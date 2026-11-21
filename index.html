@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kubernetes Visualizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* VOICE: a terminal power-user's tool: k9s meets a packet capture, dense, exact, keyboard first
+   IDEA: the whole page is one terminal session with editor tabs: traffic.flow and rollouts
+   PICTURE: full-width live cluster maps drawn like a TUI, request dots streaming across them
+   COLOUR and TYPE: one dark palette in both themes (graphite, cyan, green, yellow 4xx, red 5xx, blue v1, green v2); JetBrains Mono
+   LAYOUT: terminal header with tabs + KPI meters, command bar, map, three editor panes, log pane, sticky status line */
+:root{color-scheme:dark;--bg:#0b0e14;--ink:#d6deeb;--mute:#7f8ba3;--zone:#11151f;--card:#151a26;--line:#263044;
+--cob:#5ccfe6;--ok:#87d96c;--err:#ff6e6e;--warn:#ffcc66;--can:#2a2112;--pur:#c3a6ff;--blue:#6aa7ff;--grn:#87d96c;--mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 var(--mono);overflow-x:clip;padding-bottom:44px}
+h1,h2,h3{font-family:var(--mono);font-weight:500;margin:0}
+h1{font-size:clamp(22px,3vw,34px);line-height:1.15;color:#fff}h2{font-size:13px;margin:0}h3{font-size:16px;color:var(--cob)}
+::selection{background:#5ccfe655}
+.band{padding:clamp(16px,2.4vw,28px) max(3vw,14px)}
+.win{margin:14px max(3vw,14px) 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--zone)}
+.chrome{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#0e121b;border-bottom:1px solid var(--line);font-size:12px;color:var(--mute)}
+.chrome i{flex:none;width:12px;height:12px;border-radius:50%;display:inline-block}.chrome i:nth-child(1){background:#ff5f57}.chrome i:nth-child(2){background:#febc2e}.chrome i:nth-child(3){background:#28c840}
+.chrome span{margin-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tabs{display:flex;background:#0e121b;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs a{flex:none;display:flex;align-items:center;gap:8px;min-height:44px;padding:0 18px;color:var(--mute);text-decoration:none;border-right:1px solid var(--line);font-size:13px}
+.tabs a::before{content:'';width:8px;height:8px;border-radius:2px;background:var(--line)}
+.tabs a.on{color:#fff;background:var(--zone);box-shadow:inset 0 2px var(--cob)}.tabs a.on::before{background:var(--cob)}
+.tabs a:hover{color:#fff}
+.strip{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px 36px;align-items:end;padding:20px}
+.prompt{color:var(--ok);margin:0 0 8px;font-size:14px;overflow-wrap:anywhere}.prompt b{color:var(--cob);font-weight:500}.prompt em{font-style:normal;color:var(--ink)}
+.cur{display:inline-block;width:.6em;height:1.1em;background:var(--ink);vertical-align:-3px;animation:bl 1.1s steps(1) infinite}
+@keyframes bl{50%{opacity:0}}
+.cm{color:var(--mute)}
+.strip p{margin:10px 0 0;max-width:72ch;color:var(--mute)}
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.kpi{border:1px solid var(--line);border-radius:6px;padding:8px 10px;background:var(--card)}
+.kpi b{display:block;font:500 clamp(17px,1.9vw,23px)/1.15 var(--mono);white-space:nowrap;color:var(--cob)}
+.kpi span{font-size:11px;color:var(--mute);line-height:1.3;display:block;margin-top:3px}
+.kpi.g b{color:var(--ok)}.kpi.y b{color:var(--warn)}.kpi.r b{color:var(--err)}.kpi.b b{color:var(--blue)}.kpi.p b{color:var(--pur)}
+.bar{padding:14px max(3vw,14px) 6px;display:grid;gap:10px}
+.ctl,.try{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center}
+.ctl label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute)}
+output{font-variant-numeric:tabular-nums;color:var(--ink);min-width:3.5em;white-space:nowrap}
+input[type=range]{accent-color:var(--cob);width:100px}
+button,select,input[type=search]{font:13px var(--mono);min-height:44px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:0 12px}
+button{cursor:pointer}button:hover:not(:disabled){border-color:var(--cob);color:#fff}button:disabled{opacity:.4;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--cob);outline-offset:2px}
+button[aria-pressed=true],.seg button.on{background:#5ccfe61f;border-color:var(--cob);color:var(--cob)}
+#live[aria-pressed=true]::before{content:'● ';color:var(--ok)}#live[aria-pressed=false]::before{content:'○ ';color:var(--mute)}
+.seg{display:flex;align-items:center;font-size:13px;color:var(--mute);flex-wrap:wrap}.seg span{margin-right:8px}
+.seg button{border-radius:0;margin-left:-1px}.seg button:first-of-type{border-radius:6px 0 0 6px;margin-left:0}.seg button:last-of-type{border-radius:0 6px 6px 0}
+.chk input{width:18px;height:18px;accent-color:var(--cob)}
+.try>span{font-size:13px;color:var(--pur)}.try button{min-height:40px}
+kbd{font:12px var(--mono);color:var(--warn);margin-right:6px}
+.note{margin:0;font-size:13px;color:var(--ink);max-width:130ch;padding:8px 12px;background:var(--card);border:1px solid var(--line);border-radius:6px;overflow-wrap:anywhere}
+.note::before{content:'→ ';color:var(--ok)}
+.mapwrap{padding:8px max(3vw,14px) 0}
+.mapwrap .win{margin:0;background:#0d1119}
+.scroll{overflow-x:auto}
+.map{display:block;width:100%;min-width:960px;height:auto}
+.small{font-size:12px;color:var(--mute);margin:8px 0 0;display:flex;flex-wrap:wrap;gap:6px 16px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
+.n{cursor:pointer;outline:none}.n rect{fill:var(--card);stroke:var(--line);stroke-width:1.2;transition:stroke .2s}
+.n:hover rect,.n:focus-visible rect{stroke:var(--cob)}.n.sel rect{stroke:var(--cob);stroke-width:2.2;filter:drop-shadow(0 0 6px #5ccfe666)}
+.lane rect{fill:#121722;stroke:#1d2534;stroke-dasharray:2 4}.lane.failing rect{fill:#2a1216}.lane.down rect{fill:url(#hatch)}
+.zone{fill:none;stroke-dasharray:3 5;stroke-width:1.2}.zone.ifa{stroke:var(--warn);stroke-opacity:.55}.zone.int{stroke:var(--pur);stroke-opacity:.55}
+.zl{font:500 12px var(--mono)}.zl.ifa{fill:var(--warn)}.zl.int{fill:var(--pur)}
+.svcband{fill:#c3a6ff0a;stroke:var(--pur);stroke-dasharray:4 5;stroke-opacity:.55}
+.wire{stroke:#2b364d;stroke-width:1.2;fill:none}.wire.off{stroke-dasharray:3 6;opacity:.4}.wire.dns{stroke-dasharray:2 5}
+.t{font:500 13px var(--mono);fill:var(--ink)}.s{font:11px var(--mono);fill:var(--mute)}.s.bad{fill:var(--err)}
+.lt{font:500 14px var(--mono);fill:var(--ok)}.ct{font:500 12px var(--mono);fill:var(--pur)}
+.ghost rect{fill:none;stroke-dasharray:5 5}.can rect{fill:var(--can);stroke:#6b5420}.waf rect{stroke:#6b5420}.int rect{stroke:#4b3f73}
+.pod.crashing rect{stroke:var(--err);stroke-width:2.2}.pod.notready rect{stroke-dasharray:4 4}.pod.unknown{opacity:.35}
+.np{fill:var(--cob)}
+.pk.fly{fill:var(--cob)}.pk.ok{fill:var(--ok)}.pk.e4{fill:var(--warn)}.pk.e5{fill:var(--err)}.pk.me{stroke:#fff;stroke-width:2}
+.pk.int{fill:var(--pur)}
+.route{fill:none;stroke:var(--cob);stroke-width:4;stroke-opacity:.25;stroke-linejoin:round;stroke-linecap:round;stroke-dasharray:8 6}
+.grid{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.35fr) minmax(0,1fr);gap:14px;align-items:start}
+.card{background:var(--zone);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.card>h2,.loghd h2{display:flex;gap:8px;align-items:center;background:#0e121b;border-bottom:1px solid var(--line);padding:8px 14px;color:var(--ink)}
+.card>h2::before,.loghd h2::before{content:'';flex:none;width:8px;height:8px;border-radius:2px;background:var(--cob)}
+.card>div{padding:16px}
+.form{display:grid;gap:10px}.form label{display:grid;gap:4px;font-size:12px;color:var(--mute)}.form select{width:100%}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row button{flex:1}
+.go{background:#87d96c1f;border-color:var(--ok);color:var(--ok)}
+.mute{color:var(--mute);font-size:12px;margin:4px 0 12px}
+.chip{display:inline-block;font:500 12px var(--mono);padding:1px 8px;border-radius:4px;margin-right:8px;color:var(--bg);background:var(--ink);white-space:nowrap}
+.chip.ok{background:var(--ok)}.chip.e4{background:var(--warn)}.chip.e5{background:var(--err)}.chip.fly{background:var(--cob)}
+.chip.zi{background:var(--warn)}.chip.zn{background:var(--pur)}
+.th{font:500 14px var(--mono);overflow-wrap:anywhere}
+.hops{list-style:none;margin:0;padding:0;display:grid;border-left:1px solid var(--line);margin-left:6px}
+.hops li{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:12px;padding:8px 10px 8px 14px;position:relative}
+.hops li::before{content:'';position:absolute;left:-5px;top:14px;width:9px;height:9px;border-radius:50%;background:var(--cob)}
+.hops li.bad::before{background:var(--err)}.hops li.warn::before{background:var(--warn)}.hops li.bad b{color:var(--err)}
+.hk{font-size:12px;color:var(--pur)}.hops b{font-size:13px;font-weight:500;overflow-wrap:anywhere}.hops p{margin:2px 0 0;font-size:12px;color:var(--mute)}
+.ms{font-size:12px;color:var(--warn);white-space:nowrap;font-variant-numeric:tabular-nums}
+pre{background:#0d1119;border:1px solid var(--line);border-radius:6px;padding:10px 12px;font:12px/1.65 var(--mono);margin:8px 0 0;overflow-x:auto;color:var(--ink)}
+.k{color:var(--cob)}.v{color:var(--ok)}.y-c{color:var(--mute)}
+h4{font:500 12px var(--mono);margin:16px 0 0;color:var(--pur)}h4::before{content:'## ';color:var(--mute)}
+dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 14px;margin:0 0 12px;font-size:12px}dt{color:var(--cob)}dt::after{content:':'}dd{margin:0;overflow-wrap:anywhere;color:var(--ok)}
+table{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0 12px}td,th{text-align:left;padding:5px 8px 5px 0;border-bottom:1px dashed var(--line);vertical-align:top}th{font-weight:500;color:var(--mute);font-size:11px}
+.insp p,.how p{font-size:12px;margin:0 0 12px;color:var(--ink)}.btn{margin:4px 8px 0 0}.btn.danger{border-color:var(--err);color:var(--err)}
+.logwrap{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.loghd{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;background:#0e121b;border-bottom:1px solid var(--line)}
+.loghd h2{border:0;background:none}.loghd input{width:min(340px,100%);margin:6px 10px;min-height:36px}
+.log{background:#0d1119;max-height:360px;overflow:auto;font:12px/1.5 var(--mono)}
+.ll{display:flex;flex-wrap:wrap;gap:2px 14px;padding:4px 14px;cursor:pointer}
+.ll:hover{background:#ffffff08}.ll.on{background:#5ccfe614;box-shadow:inset 2px 0 var(--cob)}
+.ll .c{color:var(--mute)}.ll .ip{color:var(--pur)}.ll .st{color:var(--ok)}.ll.e4 .st{color:var(--warn)}.ll.e5 .st{color:var(--err)}.ll .ms2{color:var(--warn)}
+.ll .z{color:var(--warn)}.ll .z.int{color:var(--pur)}
+.ll.ev{cursor:default;color:var(--mute)}.ll.ev.warn .w{color:var(--err)}.ll.ev.good .w{color:var(--ok)}
+.status{position:fixed;left:0;right:0;bottom:0;display:flex;overflow-x:auto;background:#0e121b;border-top:1px solid var(--line);font-size:12px;white-space:nowrap;z-index:5}
+.status span{flex:none;padding:7px 12px;border-right:1px solid var(--line)}.status .mode{background:var(--ok);color:var(--bg);font-weight:500}.status .mode.stop{background:var(--warn)}.status .r{margin-left:auto;color:var(--mute)}
+.help{position:fixed;inset:0;background:#000a;display:none;place-items:center;z-index:9;padding:16px}.help.on{display:grid}
+.help>div{background:var(--zone);border:1px solid var(--line);border-radius:8px;padding:20px 24px;max-width:520px;width:100%;max-height:90vh;overflow:auto}
+.help dl{font-size:13px}.help dt::after{content:''}
+[hidden]{display:none!important}
+/* rollouts */
+.pd rect{stroke-width:1.5}.pd .pl{font:500 12px var(--mono);fill:var(--ink)}.pd .ps{font:11px var(--mono);fill:var(--mute)}
+.pd.v1 rect{stroke:var(--blue)}.pd.v2 rect{stroke:var(--grn)}
+.pd.ready.v1 rect{fill:#6aa7ff26}.pd.ready.v2 rect{fill:#87d96c26}
+.pd.pending rect{stroke:var(--mute);stroke-dasharray:3 4;fill:none}.pd.creating rect{fill:url(#stripe)}.pd.starting rect{stroke-dasharray:6 3;fill:var(--card)}
+.pd.crash rect{stroke:var(--err);fill:#ff6e6e14}.pd.crash .ps{fill:var(--err)}.pd.term{opacity:.4}.pd.term .ps{fill:var(--err)}
+.pd.ready .ps{fill:var(--ok)}.pd.v1.ready .ps{fill:var(--blue)}
+.rs{fill:#121722;stroke:#1d2534}.rs.on{stroke-width:1.5}.rs.v1.on{stroke:var(--blue)}.rs.v2.on{stroke:var(--grn)}
+.rh{font:500 14px var(--mono)}.rh.v1{fill:var(--blue)}.rh.v2{fill:var(--grn)}
+.dk.v1{fill:var(--blue)}.dk.v2{fill:var(--grn)}.dk.no{fill:var(--err)}.dk.m{fill:none;stroke:var(--grn);stroke-width:1.5;stroke-dasharray:2 2}.dk.sm{fill:var(--warn)}
+.flash{fill:none;stroke:var(--err);stroke-width:2}
+.strat{display:flex;flex-wrap:wrap;gap:8px}
+.steps{margin:8px 0 12px;padding-left:22px;font-size:12px;color:var(--mute)}.steps li{padding:3px 0}.steps li.on{color:#fff}.steps li.on::marker{color:var(--ok)}.steps li.dn{color:var(--ok)}
+.fig{position:relative;height:150px;margin-top:6px}.fig>svg{position:absolute;inset:0;width:100%;height:100%}
+.ax{stroke:var(--line)}.axt{font:10px var(--mono);fill:var(--mute)}
+.leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11px;color:var(--mute)}.leg i{display:inline-block;width:14px;height:3px;margin-right:6px;vertical-align:3px}
+.rstat{font-size:12px;color:var(--warn);margin:0 0 10px;overflow-wrap:anywhere}
+.tag{font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--mute);margin-left:6px}
+html{scroll-padding-top:72px}
+@media(max-width:1080px){.grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.grid .card:first-child{grid-column:1/-1}.strip{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:700px){.grid{grid-template-columns:minmax(0,1fr)}.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.hops li{grid-template-columns:minmax(0,1fr) auto}.hk{grid-column:1/-1}}
+@media(prefers-reduced-motion:reduce){.n rect{transition:none}.cur{animation:none}}
+</style>
+</head>
+<body>
+<header class="win">
+ <div class="chrome"><i></i><i></i><i></i><span>dev@prod-us-east: ~/k8s/shop — kubectl — 120×40</span></div>
+ <nav class="tabs" aria-label="Views"><a href="#traffic" data-v="traffic">traffic.flow</a><a href="#rollouts" data-v="rollouts">rollouts.yaml</a></nav>
+ <div class="strip">
+  <div>
+    <p class="prompt" id="cmd"></p>
+    <h1 id="ttl"></h1>
+    <p id="sub"></p>
+  </div>
+  <div class="kpis" id="kpis" aria-live="polite"></div>
+ </div>
+</header>
+
+<!-- ================= TRAFFIC VIEW ================= -->
+<main id="v-traffic">
+<section class="bar">
+  <div class="ctl">
+    <button id="live" aria-pressed="true">Live traffic on</button>
+    <label>Rate <input type="range" id="rate" min="1" max="8" value="3"><output id="rateo">3 req/s</output></label>
+    <label>Speed <input type="range" id="speed" min="0.25" max="2" step="0.25" value="1"><output id="speedo">1×</output></label>
+    <div class="seg" role="group" aria-label="externalTrafficPolicy"><span>externalTrafficPolicy</span><button data-pol="Cluster">Cluster</button><button data-pol="Local">Local</button></div>
+    <label>Canary weight <input type="range" id="canary" min="0" max="50" step="5" value="0"><output id="canaryo">0%</output></label>
+    <label class="chk"><input type="checkbox" id="rl"> limit-rps: 5 per IP</label>
+  </div>
+  <div class="try" id="try"><span>$ run scenario</span></div>
+  <p class="note" id="note">Yellow paths are internet-facing (IFA) traffic: public DNS, CDN/WAF, then the external load balancer. Purple paths are internal (non-IFA) traffic: corporate DNS, then the private load balancer. The two never share an ingress controller.</p>
+</section>
+<section class="mapwrap">
+  <div class="win"><div class="chrome"><i></i><i></i><i></i><span>cluster.map · prod-us-east · 3 nodes · 2 ingress classes · click any box</span></div><div class="scroll"><svg id="map" class="map" viewBox="0 0 1160 770" role="img" aria-label="Kubernetes cluster topology with live requests">
+    <defs><pattern id="hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="10" height="10" fill="#121722"/><line x1="0" y1="0" x2="0" y2="10" stroke="#ff6e6e" stroke-opacity=".35" stroke-width="3"/></pattern></defs>
+    <g id="st"></g><g id="pk"></g>
+  </svg></div></div>
+  <p class="small"><span><i class="dot" style="background:var(--cob)"></i>IFA request in flight</span><span><i class="dot" style="background:var(--pur)"></i>Non-IFA request in flight</span><span><i class="dot" style="background:var(--ok)"></i>2xx</span><span><i class="dot" style="background:var(--warn)"></i>4xx / blocked</span><span><i class="dot" style="background:var(--err)"></i>5xx or timeout</span><span>Simulated cluster: names, IPs and timings are illustrative.</span></p>
+</section>
+<section class="band grid">
+  <div class="card"><h2>curl.sh</h2><div>
+    <div class="form">
+      <label>From <select id="fc"></select></label>
+      <label>Method <select id="fm"><option>GET</option><option>POST</option></select></label>
+      <label>Host <select id="fh"><option>shop.example.com</option><option>ops.corp.internal</option><option>api.corp.internal</option><option>admin.example.com</option></select></label>
+      <label>Path <select id="fp"><option>/</option><option>/products</option><option>/products/42</option><option>/api/orders</option><option>/api/cart</option><option>/products?id=1' OR '1'='1</option></select></label>
+      <div class="row"><button class="go" id="go">Send and trace</button><button id="burst">Burst ×15</button></div>
+    </div></div>
+  </div>
+  <div class="card"><h2>trace.log</h2><div id="trace"></div></div>
+  <div class="card insp"><h2>inspector.yaml</h2><div id="insp"></div></div>
+</section>
+<section class="band" style="padding-top:0">
+  <div class="logwrap"><div class="loghd"><h2>kubectl logs -f -l app=ingress-nginx &amp;&amp; kubectl get events -w</h2><input type="search" id="flt" placeholder="/ grep: 502, non-ifa, node-c, waf" aria-label="Filter log"></div>
+  <div class="log" id="log"></div></div>
+</section>
+</main>
+
+<!-- ================= ROLLOUTS VIEW ================= -->
+<main id="v-rollouts" hidden>
+<section class="bar">
+  <div class="strat" id="strat" role="group" aria-label="Deployment strategy"></div>
+  <div class="ctl">
+    <label>Replicas <input type="range" id="dN" min="2" max="8" value="4"><output id="dNo">4</output></label>
+    <label>maxSurge <input type="range" id="dS" min="0" max="2" value="1"><output id="dSo">1</output></label>
+    <label>maxUnavailable <input type="range" id="dU" min="0" max="2" value="0"><output id="dUo">0</output></label>
+    <label>v2 behaviour <select id="dM"><option value="ok">healthy</option><option value="bug">returns 5xx on 30% of requests</option><option value="readiness">fails its readiness probe</option></select></label>
+    <label>Speed <input type="range" id="dSp" min="0.5" max="3" step="0.5" value="1"><output id="dSpo">1×</output></label>
+  </div>
+  <div class="ctl">
+    <button class="go" id="dGo">▶ Deploy v2</button><button id="dPause">Pause</button><button id="dStep">Step 1 tick</button><button id="dUndo">kubectl rollout undo</button><button id="dReset">Reset to v1</button>
+  </div>
+  <p class="note" id="dPhase"></p>
+</section>
+<section class="mapwrap">
+  <div class="win"><div class="chrome"><i></i><i></i><i></i><span id="dChrome">deployment/web · namespace shop</span></div><div class="scroll"><svg id="dmap" class="map" viewBox="0 0 1160 500" role="img" aria-label="Deployment rollout: ReplicaSets, pods and traffic split">
+    <defs><pattern id="stripe" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#151a26"/><line x1="0" y1="0" x2="0" y2="8" stroke="#7f8ba3" stroke-opacity=".35" stroke-width="3"/></pattern></defs>
+    <g id="dst"></g><g id="dpk"></g>
+  </svg></div></div>
+  <p class="small"><span><i class="dot" style="background:var(--blue)"></i>Request served by v1 (blue)</span><span><i class="dot" style="background:var(--grn)"></i>Request served by v2 (green)</span><span><i class="dot" style="border:1.5px dashed var(--grn)"></i>Mirrored copy</span><span><i class="dot" style="background:var(--warn)"></i>Smoke test</span><span><i class="dot" style="background:var(--err)"></i>Error the user sees</span><span>Pod states: Pending → ContainerCreating → Running (not ready) → Ready → Terminating. Hover a pod for detail.</span></p>
+</section>
+<section class="band grid">
+  <div class="card how"><h2>how-it-works.md</h2><div id="how"></div></div>
+  <div class="card"><h2>metrics.watch</h2><div>
+    <p class="rstat" id="rstat"></p>
+    <div class="leg"><span><i style="background:var(--blue)"></i>v1 Ready pods</span><span><i style="background:var(--grn)"></i>v2 Ready pods</span><span><i style="background:var(--mute)"></i>desired replicas</span></div>
+    <div class="fig" id="ch1"><svg></svg></div>
+    <div class="leg" style="margin-top:12px"><span><i style="background:var(--grn)"></i>% of user traffic on v2</span><span><i style="background:var(--err)"></i>% of user requests failing</span><span><i style="background:var(--warn)"></i>% failing on v2 only</span></div>
+    <div class="fig" id="ch2"><svg></svg></div>
+  </div></div>
+  <div class="card"><h2>kubectl get events -w</h2><div class="log" id="dlog" style="border:0;max-height:420px;margin:-16px"></div></div>
+</section>
+</main>
+
+<div class="status" id="status"></div>
+<div class="help" id="help" role="dialog" aria-label="Keyboard shortcuts"><div><h3>Keyboard shortcuts</h3>
+<h4>Everywhere</h4><dl><dt>t / r</dt><dd>traffic.flow / rollouts.yaml</dd><dt>?  esc</dt><dd>Show or hide this</dd></dl>
+<h4>traffic.flow</h4><dl><dt>1 – 8</dt><dd>Run a scenario</dd><dt>space</dt><dd>Live traffic on or off</dd><dt>s / b</dt><dd>Send and trace / burst ×15</dd><dt>p</dt><dd>Flip externalTrafficPolicy</dd><dt>+ / −</dt><dd>Request rate</dd><dt>/</dt><dd>Filter the log</dd></dl>
+<h4>rollouts.yaml</h4><dl><dt>1 – 6</dt><dd>Pick a strategy</dd><dt>d</dt><dd>Deploy v2</dd><dt>space</dt><dd>Pause or resume</dd><dt>n</dt><dd>Step one tick</dd><dt>u</dt><dd>Rollout undo</dd><dt>x</dt><dd>Reset to v1</dd></dl>
+<button id="hclose">Close</button></div></div>
+
+<script>
+{
+const $=s=>document.querySelector(s);
+const setHTML=(el,h)=>{if(el._h!==h){el.innerHTML=h;el._h=h}};
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let VIEW='traffic';
+const ts=t=>{const d=new Date(t);return d.toTimeString().slice(0,8)+'.'+String(d.getMilliseconds()).padStart(3,'0')};
+const yaml=t=>t.split('\n').map(l=>{const m=l.match(/^(\s*-?\s*)([\w./-]+)(:)(.*)$/);if(m&&!l.trim().startsWith('#'))return `${m[1]}<span class="k">${m[2]}</span>:${m[4]?'<span class="v">'+m[4]+'</span>':''}`;return l.trim().startsWith('#')?`<span class="y-c">${l}</span>`:l}).join('\n');
+
+/* =====================================================================
+   TRAFFIC VIEW
+   ===================================================================== */
+const S={live:true,rate:3,speed:1,policy:'Cluster',canary:0,rl:false,sel:{k:'ing',id:'nginx-external-a'},selReq:null,flt:''};
+const clients=[
+ {id:'c1',name:'Browser',where:'Newark, NJ',ip:'203.0.113.24',y:100,zone:'ifa'},
+ {id:'c2',name:'Mobile app',where:'London, UK',ip:'198.51.100.7',y:200,zone:'ifa'},
+ {id:'c3',name:'Partner API',where:'Frankfurt, DE',ip:'192.0.2.55',y:300,zone:'ifa'},
+ {id:'c4',name:'Teller desktop',where:'Branch LAN',ip:'10.20.4.15',y:540,zone:'int'},
+ {id:'c5',name:'Batch job',where:'On-prem DC',ip:'10.30.8.2',y:660,zone:'int'}];
+const nodes=[{id:'node-a',ip:'10.0.1.11',top:30},{id:'node-b',ip:'10.0.1.12',top:280},{id:'node-c',ip:'10.0.1.13',top:530}];
+nodes.forEach(n=>n.state='ready');
+const ROW=[85,175];
+const ings=[{id:'nginx-external-a',node:'node-a',cls:'ext',ip:'10.244.1.5'},{id:'nginx-external-b',node:'node-b',cls:'ext',ip:'10.244.2.5'},
+ {id:'nginx-internal-b',node:'node-b',cls:'int',ip:'10.244.2.6'},{id:'nginx-internal-c',node:'node-c',cls:'int',ip:'10.244.3.5'}];
+const svcs=[{id:'web-svc',ip:'10.96.12.40',y:115,sel:'app=web, track=stable',rr:0},{id:'web-canary-svc',ip:'10.96.12.41',y:285,sel:'app=web, track=canary',rr:0},
+ {id:'api-svc',ip:'10.96.30.8',y:455,sel:'app=api',rr:0},{id:'ops-svc',ip:'10.96.44.2',y:640,sel:'app=ops',rr:0}];
+const pods=[
+ {id:'web-7f9c-a1',svc:'web-svc',node:'node-a',col:0,row:0,ip:'10.244.1.7'},{id:'api-5d8b-x2',svc:'api-svc',node:'node-a',col:1,row:0,ip:'10.244.1.9'},{id:'ops-6c2f-r2',svc:'ops-svc',node:'node-a',col:0,row:1,ip:'10.244.1.12'},
+ {id:'web-7f9c-b4',svc:'web-svc',node:'node-b',col:0,row:0,ip:'10.244.2.8'},{id:'web-canary-c9',svc:'web-canary-svc',node:'node-b',col:1,row:0,ip:'10.244.2.11'},{id:'api-5d8b-p3',svc:'api-svc',node:'node-b',col:0,row:1,ip:'10.244.2.14'},
+ {id:'api-5d8b-k7',svc:'api-svc',node:'node-c',col:0,row:0,ip:'10.244.3.6'},{id:'web-7f9c-m3',svc:'web-svc',node:'node-c',col:1,row:0,ip:'10.244.3.9'},{id:'ops-6c2f-q1',svc:'ops-svc',node:'node-c',col:0,row:1,ip:'10.244.3.11'}];
+pods.forEach(p=>{p.state='ready';p.restarts=0});
+const N=id=>nodes.find(n=>n.id===id),SV=id=>svcs.find(s=>s.id===id),PD=id=>pods.find(p=>p.id===id);
+const PX=p=>p.col?1000:840, PY=p=>N(p.node).top+ROW[p.row];
+const hasIng=(n,cls)=>ings.some(i=>i.node===n.id&&i.cls===cls);
+const flying=[],done=[],logs=[],ridMap={},rlHits={},lbRR={ext:0,int:0};
+const rid=()=>Math.random().toString(16).slice(2,10);
+const cls=r=>!r.end?'fly':(r.status==='ERR'||r.status>=500)?'e5':(r.status==='NXDOMAIN'||r.status>=400)?'e4':'ok';
+const stLabel=r=>!r.end?'in flight':r.status==='ERR'?'timeout':r.status;
+const lbOff=(n,c)=>n.state==='down'||(S.policy==='Local'&&!hasIng(n,c));
+const inEp=p=>(p.state==='ready'||p.state==='crashing')&&N(p.node).state==='ready';
+const recent=id=>done.filter(r=>Date.now()-r.end<10000&&r.touch.includes(id));
+const errs=rs=>rs.filter(r=>cls(r)!=='ok').length;
+const pct=(rs,q)=>{if(!rs.length)return 0;const a=rs.map(r=>r.ms).sort((x,y)=>x-y);return a[Math.min(a.length-1,Math.floor(q*a.length))]};
+
+function route(c,method,host,path,opts={}){
+ const r={rid:rid(),c,method,host,path,t0:Date.now(),hops:[],pts:[[170,c.y]],touch:[c.id],status:null,ms:0};
+ const hop=(k,id,title,text,ms,bad)=>{r.hops.push({k,id,title,text,ms,bad});r.ms+=ms;if(id&&!r.touch.includes(id))r.touch.push(id)};
+ const end=s=>{r.status=s;return r};
+ const pub=!host.endsWith('.internal');r.zone=pub?'ifa':'int';
+ if(!pub){
+  if(c.zone==='ifa'){r.pts.push([205,63]);hop('DNS','pdns','NXDOMAIN',`${host} exists only in the corporate DNS zone. Non-IFA apps have no public DNS record and no public load balancer, so from the internet the app does not exist at all.`,30,'bad');return end('NXDOMAIN')}
+  hop('DNS','idns',`${host} → 10.0.0.50`,'The corporate resolver answers from the private zone corp.internal. 10.0.0.50 is a private address that only routes inside the company network or over VPN.',0.3);
+  r.pts.push([272,623]);
+  return inCluster(r,c,'int',c.ip,c.ip,hop,end,opts);
+ }
+ const egress=c.zone==='int',l4=egress?'192.0.2.200':c.ip;
+ hop('DNS','pdns',`${host} → CDN edge (anycast)`,`Public DNS points the name at the nearest CDN / WAF edge, so the cluster's own load balancer address is never exposed. ${egress?'This client is inside the company, so it leaves through the corporate egress proxy (NAT 192.0.2.200) and comes back in from the internet like any customer.':''}`,0.2);
+ r.pts.push([272,158]);
+ if(/'|<script/i.test(path)){hop('WAF','waf','403 blocked by WAF rule 942100','The managed SQL-injection rule matched the query string. The edge drops the request, so it never reaches the load balancer or the cluster.',2,'bad');return end(403)}
+ hop('WAF','waf','TLS terminated · WAF rules passed',`The edge decrypts HTTPS with the public certificate, checks the request against WAF rules (SQL injection, XSS, bot score, geo), then opens a new TLS connection to the external load balancer. It appends X-Forwarded-For: ${l4}. From here on, the TCP source is the edge address 130.211.1.9, not the client.`,4);
+ r.pts.push([272,273]);
+ return inCluster(r,c,'ext','130.211.1.9',l4,hop,end,opts);
+}
+function inCluster(r,c,cl,l4src,realClient,hop,end,opts){
+ const ext=cl==='ext',lbId=ext?'elb':'ilb',lbIp=ext?'34.120.8.10':'10.0.0.50',np=ext?30443:31443,word=ext?'external':'internal';
+ const {host,path,method}=r,now=Date.now();
+ const targets=nodes.filter(n=>!lbOff(n,cl));
+ if(!targets.length){hop('Load balancer',lbId,'No healthy targets','Every node is failing the health check, so the connection is dropped.',1,'bad');return end('ERR')}
+ const n=opts.node&&targets.includes(N(opts.node))?N(opts.node):targets[lbRR[cl]++%targets.length];
+ r.via=n.id;
+ hop('Load balancer',lbId,`TCP ${lbIp}:443 → ${n.id}:${np}`,(ext?'Public L4 load balancer: it forwards TCP and never reads HTTP. ':'Private L4 load balancer, reachable only from the corporate network. It forwards TCP and never reads HTTP. ')+(S.policy==='Local'?`Under externalTrafficPolicy: Local only nodes running an ${word} ingress pod pass the health check on :10256/healthz.`:`Under externalTrafficPolicy: Cluster every Ready node passes the health check, even one with no ${word} ingress pod.`),0.4);
+ r.pts.push([380,n.top+ROW[ext?0:1]]);r.touch.push(n.id);
+ if(n.state==='failing'){hop('Node',n.id,'Connection timed out',`${n.id} has stopped responding. The load balancer keeps sending traffic until three health checks in a row fail, so clients that land here in that window time out.`,1000,'bad');return end('ERR')}
+ let ingNode;const avail=nodes.filter(x=>hasIng(x,cl)&&x.state==='ready');
+ if(S.policy==='Local')ingNode=n;else{if(!avail.length){hop('Node',n.id,`No ${word} ingress pods`,`No ${word} ingress controller pod is running anywhere.`,0.5,'bad');return end('ERR')}ingNode=avail[Math.random()*avail.length|0]}
+ const remote=S.policy==='Cluster'?n.ip:l4src,hopN=ingNode!==n;
+ if(S.policy==='Cluster')hop('Node',n.id,hopN?`kube-proxy forwards to ${ingNode.id}`:`kube-proxy picks the local ${word} ingress pod`,`${hasIng(n,cl)?'':`This node runs no ${word} ingress pod. `}With externalTrafficPolicy: Cluster, kube-proxy can choose any ${word} ingress pod in the cluster${hopN?`, and it chose one on ${ingNode.id}, which adds a hop`:''}. It also SNATs the packet, so nginx sees the source as the node IP ${n.ip} instead of ${l4src}.`,hopN?0.5:0.1,'warn');
+ else hop('Node',n.id,`NodePort ${np} → local ${word} ingress pod`,`externalTrafficPolicy: Local keeps the packet on this node and skips SNAT, so nginx sees the real TCP source ${l4src}.`,0.1);
+ const iy=ingNode.top+ROW[ext?0:1];r.pts.push([418,iy],[578,iy]);
+ const ing=ings.find(i=>i.node===ingNode.id&&i.cls===cl);r.ing=ing.id;r.touch.push(ing.id,ingNode.id);
+ const real=ext?realClient:remote;r.src=real;r.remote=remote;
+ hop('Ingress',ing.id,ext?`TLS re-terminated · ${method} ${host}${path}`:`TLS terminated · ${method} ${host}${path}`,ext
+  ?`ingressClassName: nginx-external. The TCP source (remote_addr) is ${remote}. use-forwarded-headers is on and the edge and node ranges are in proxy-real-ip-cidr, so nginx trusts X-Forwarded-For and recovers the real client ${real}.`
+  :`ingressClassName: nginx-internal, with a certificate from the internal CA. There is no WAF or CDN in front, so there is no trusted X-Forwarded-For. nginx can only use the TCP source, which is ${remote}${remote!==c.ip?`: the node IP, not the client ${c.ip}`:', the real client'}.`,1.1);
+ if(S.rl){const a=(rlHits[real]=(rlHits[real]||[]).filter(t=>now-t<1000));a.push(now);
+  if(a.length>5){hop('Ingress',ing.id,'429 Too Many Requests',`limit-rps allows 5 requests per second per client IP, and ${real} has sent ${a.length} in the last second.${real!==c.ip&&!ext?` Because of SNAT, this counter is shared by every internal client that entered through ${n.id}.`:''}`,0.1,'bad');return end(429)}}
+ let svc,why;
+ if(ext){
+  if(host!=='shop.example.com'){hop('Ingress',ing.id,'404 from the default backend',`No Ingress rule of class nginx-external matches host ${host}, so nginx answers the request itself and it never reaches a Service.`,0.2,'bad');return end(404)}
+  const api=path.startsWith('/api');svc=SV(api?'api-svc':'web-svc');why=api?'The rule shop.example.com /api (Prefix) points to api-svc:80':'The rule shop.example.com / (Prefix) points to web-svc:80';
+  if(!api&&S.canary>0&&Math.random()*100<S.canary){svc=SV('web-canary-svc');why+=`, and the canary Ingress (canary-weight: ${S.canary}) sent this request to web-canary-svc instead`}
+ }else{
+  if(host==='ops.corp.internal'){svc=SV('ops-svc');why='The rule ops.corp.internal / points to ops-svc:80. This app has no external Ingress, so it is non-IFA by construction'}
+  else if(host==='api.corp.internal'){svc=SV('api-svc');why='The rule api.corp.internal / points to api-svc:80, the same pods the internet reaches through shop.example.com/api, just through a different front door'}
+  else{hop('Ingress',ing.id,'404 from the default backend',`No Ingress rule of class nginx-internal matches host ${host}.`,0.2,'bad');return end(404)}
+ }
+ const eps=pods.filter(p=>p.svc===svc.id&&inEp(p));r.touch.push(svc.id);r.svc=svc.id;
+ if(!eps.length){r.pts.push([625,svc.y]);hop('Service',svc.id,'503 Service Unavailable',`${why}, but ${svc.id} has no ready endpoints, so nginx returns 503.`,0.3,'bad');return end(503)}
+ const p=eps[svc.rr++%eps.length],pn=N(p.node),cross=pn!==ingNode;
+ r.pts.push([625,svc.y],[795,svc.y],[PX(p),PY(p)]);r.touch.push(p.id,pn.id);r.pod=p.id;
+ hop('Service',svc.id,`${svc.id} → ${p.ip}:8080`,`${why}. ingress-nginx reads the Service's EndpointSlice and connects straight to a pod IP, skipping the ClusterIP ${svc.ip}. It chose ${p.id} out of ${eps.length} ready endpoint${eps.length>1?'s':''}. ${cross?`That pod runs on ${pn.id}, so the packet crosses the pod network (CNI overlay) between nodes.`:'That pod is on the same node, so there is no extra hop.'}`,cross?0.6:0.05);
+ r.hdr=`Host: ${host}\nX-Request-ID: ${r.rid}\nX-Real-IP: ${real}\nX-Forwarded-For: ${ext?real+', '+remote:remote}\nX-Forwarded-Proto: https\nX-Forwarded-Host: ${host}`;
+ if(p.state==='crashing'){hop('Pod',p.id,'502 Bad Gateway','The container has crashed, but its readiness probe has not failed three times yet, so the pod is still an endpoint. nginx gets "connection refused" and returns 502.',0.4,'bad');return end(502)}
+ const can=svc.id==='web-canary-svc',b=svc.id==='api-svc'?[25,90]:svc.id==='ops-svc'?[15,60]:can?[70,190]:[12,45],app=b[0]+Math.random()*(b[1]-b[0]);
+ const st=can&&Math.random()<.06?500:method==='POST'?201:200;
+ hop('Pod',p.id,`${st} from ${p.id}`,st===500?'The v2 canary build threw an exception. Check the canary error rate before raising the weight (see rollouts.yaml).':`The app handled ${method} ${path} in ${app.toFixed(0)} ms${can?'. Canary build v2 is noticeably slower':''}.`,app,st===500?'bad':0);
+ return end(st);
+}
+function geo(r){r.seg=[0];for(let i=1;i<r.pts.length;i++){const[a,b]=r.pts[i-1],[c,d]=r.pts[i];r.seg.push(r.seg[i-1]+Math.hypot(c-a,d-b))}r.len=r.seg[r.seg.length-1];r.d=0;r.back=false}
+function at(r,d){const P=r.pts||r.p;for(let i=1;i<r.seg.length;i++){if(d<=r.seg[i]){const f=(d-r.seg[i-1])/((r.seg[i]-r.seg[i-1])||1),[a,b]=P[i-1],[c,e]=P[i];return[a+(c-a)*f,b+(e-b)*f]}}return P[P.length-1]}
+let dirty=true;
+function send(c,method,host,path,opts={}){const r=route(c,method,host,path,opts);geo(r);ridMap[r.rid]=r;if(flying.length<90&&VIEW==='traffic')flying.push(r);else finish(r);if(opts.select){S.selReq=r;renderTrace()}return r}
+function finish(r){r.end=Date.now();done.push(r);if(done.length>700)done.shift();logs.unshift({req:r});if(logs.length>400)logs.pop();dirty=true;if(r===S.selReq)renderTrace()}
+function ev(text,lvl=''){logs.unshift({ev:1,t:Date.now(),text,lvl});dirty=true}
+const paths=['/','/','/products','/products/42','/api/orders','/api/cart'];
+function randomReq(){if(Math.random()<.3){const c=clients[3+(Math.random()<.6?0:1)];return send(c,'GET',Math.random()<.6?'ops.corp.internal':'api.corp.internal',Math.random()<.5?'/':'/accounts')}
+ const c=clients[Math.random()*3|0],p=paths[Math.random()*paths.length|0];return send(c,p==='/api/orders'&&Math.random()<.3?'POST':'GET',Math.random()<.04?'admin.example.com':'shop.example.com',p)}
+
+function killPod(id){const p=PD(id);if(p.state!=='ready')return;p.state='crashing';ev(`Warning  BackOff  pod/${id}: container exited with code 137 (still listed as an endpoint)`,'warn');
+ setTimeout(()=>{p.state='notready';ev(`Warning  Unhealthy  pod/${id}: readiness probe failed 3 times, removed from the EndpointSlice`,'warn');draw()},3000);
+ setTimeout(()=>{p.state='ready';p.restarts++;ev(`Normal  Ready  pod/${id}: restart #${p.restarts}, readiness passed, added back to endpoints`,'good');draw()},10000);draw()}
+function failNode(id){const n=N(id);if(n.state!=='ready')return;n.state='failing';ev(`Warning  NodeNotReady  ${id}: kubelet stopped posting status. LB health checks failing`,'warn');
+ setTimeout(()=>{if(n.state!=='failing')return;n.state='down';ev(`Normal  LB  ${id} removed from both load balancers after 3 failed checks`);draw()},2500);draw()}
+function recoverNode(id){N(id).state='ready';ev(`Normal  NodeReady  ${id}: kubelet is posting status. Back in LB rotation`,'good');draw()}
+
+/* ---------- map ---------- */
+const st=$('#st'),pk=$('#pk');
+function box(k,id,x,y,w,h,lines,extra=''){const sel=S.sel&&S.sel.k===k&&S.sel.id===id?' sel':'';
+ return `<g class="n ${extra}${sel}" data-k="${k}" data-id="${id}" tabindex="0" role="button" aria-label="${lines[0]}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7"/>${lines.map((l,i)=>`<text x="${x+11}" y="${y+20+i*16}" class="${i?'s':'t'}${typeof l==='object'?' bad':''}">${typeof l==='object'?l.b:l}</text>`).join('')}</g>`}
+const line=(a,b,c='')=>`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" class="wire ${c}"/>`;
+function draw(){let h='';
+ h+=`<rect x="8" y="28" width="344" height="380" rx="10" class="zone ifa"/><text x="16" y="20" class="zl ifa">Internet · IFA (internet-facing)</text>`;
+ h+=`<rect x="8" y="430" width="344" height="320" rx="10" class="zone int"/><text x="16" y="424" class="zl int">Corporate network · non-IFA</text>`;
+ nodes.forEach(n=>{const sel=S.sel&&S.sel.k==='node'&&S.sel.id===n.id?' sel':'';const lab=n.state==='ready'?'Ready':n.state==='failing'?'Not responding':'NotReady';
+  h+=`<g class="n lane ${n.state}${sel}" data-k="node" data-id="${n.id}" tabindex="0" role="button" aria-label="${n.id}"><rect x="380" y="${n.top}" width="770" height="230" rx="12"/><text x="398" y="${n.top+24}" class="lt">${n.id}</text><text x="462" y="${n.top+24}" class="s${n.state!=='ready'?' bad':''}">${n.ip} · ${lab}</text></g>`});
+ h+=`<rect x="612" y="30" width="196" height="730" rx="12" class="svcband"/><text x="710" y="20" text-anchor="middle" class="ct">Services · EndpointSlices</text>`;
+ clients.forEach(c=>{if(c.zone==='ifa'){h+=line([170,c.y],[205,158])+line([170,c.y],[205,63],'dns')}else{h+=line([170,c.y],[205,623])+line([170,c.y],[205,468],'dns')}});
+ h+=line([272,196],[272,235]);
+ nodes.forEach(n=>{h+=line([340,273],[380,n.top+ROW[0]],lbOff(n,'ext')?'off':'')+line([340,623],[380,n.top+ROW[1]],lbOff(n,'int')?'off':'')});
+ ings.forEach(i=>{const n=N(i.node),y=n.top+ROW[i.cls==='ext'?0:1];h+=line([380,y],[418,y]);(i.cls==='ext'?['web-svc','web-canary-svc','api-svc']:['api-svc','ops-svc']).forEach(s=>h+=line([578,y],[625,SV(s).y]))});
+ pods.forEach(p=>{h+=line([795,SV(p.svc).y],[PX(p),PY(p)],inEp(p)?'':'off')});
+ h+=box('pdns','pdns',205,40,135,46,['Public DNS','shop.example.com'],'waf');
+ h+=box('waf','waf',205,120,135,76,['CDN / WAF','edge 130.211.0.0/22','TLS · OWASP rules'],'waf');
+ h+=box('elb','elb',205,235,135,76,['External LB','34.120.8.10:443','L4 · public'],'waf');
+ h+=box('idns','idns',205,445,135,46,['Corporate DNS','*.corp.internal'],'int');
+ h+=box('ilb','ilb',205,585,135,76,['Internal LB','10.0.0.50:443','L4 · private'],'int');
+ clients.forEach(c=>{h+=box('client',c.id,20,c.y-32,150,64,[c.name,c.ip,c.where],c.zone==='int'?'int':'')});
+ nodes.forEach(n=>{['ext','int'].forEach((cl,ri)=>{const y=n.top+ROW[ri];
+  h+=`<circle cx="380" cy="${y}" r="5" class="np"/><text x="377" y="${y-8}" text-anchor="end" class="s" style="font-size:9.5px">:${cl==='ext'?30443:31443}</text>`;
+  const g=ings.find(i=>i.node===n.id&&i.cls===cl);
+  if(g)h+=box('ing',g.id,418,y-25,160,50,[g.id,n.state==='ready'?`${g.ip} · ${recent(g.id).length}/10s`:{b:'Unreachable'}],cl==='int'?'int':'waf');
+  else h+=box('node',n.id,418,y-25,160,50,[`No ${cl==='ext'?'external':'internal'} ingress`,S.policy==='Local'?'LB health check 503':'kube-proxy forwards'],'ghost')})});
+ svcs.forEach(s=>{const e=pods.filter(p=>p.svc===s.id&&inEp(p)).length;h+=box('svc',s.id,625,s.y-25,170,50,[s.id,e?`${e} ready endpoint${e>1?'s':''}`:{b:'0 endpoints'}],s.id.includes('canary')?'can':'')});
+ pods.forEach(p=>{const n=N(p.node),cnt=recent(p.id).length;
+  const sub=n.state!=='ready'?{b:'Unknown (node down)'}:p.state==='ready'?`${p.ip} · ${cnt}/10s`:p.state==='crashing'?{b:'Crashed (still EP)'}:{b:'Restarting'};
+  h+=box('pod',p.id,PX(p),PY(p)-25,140,50,[p.id,sub],`pod ${n.state!=='ready'?'unknown':p.state}${p.svc.includes('canary')?' can':''}`)});
+ setHTML(st,h);
+}
+const onPick=e=>{const g=e.target.closest('[data-k]');if(!g)return;S.sel={k:g.dataset.k,id:g.dataset.id};draw();renderInsp()};
+$('#map').addEventListener('click',onPick);
+$('#map').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();onPick(e)}});
+
+function frameTraffic(dt){const v=0.42*S.speed*(reduce?6:1);let h='';
+ if(S.selReq)h+=`<polyline points="${S.selReq.pts.join(' ')}" class="route"/>`;
+ for(let i=flying.length-1;i>=0;i--){const r=flying[i];r.d+=dt*v*(r.back?1.7:1);
+  if(!r.back&&r.d>=r.len){r.back=true;r.d=0}
+  if(r.back&&r.d>=r.len){flying.splice(i,1);finish(r);continue}
+  const[x,y]=at(r,r.back?r.len-r.d:r.d),me=r===S.selReq;
+  const c=r.back?(r.status==='ERR'||r.status>=500?'e5':(r.status==='NXDOMAIN'||r.status>=400)?'e4':'ok'):(r.zone==='int'?'int':'fly');
+  h+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${me?8:5}" class="pk ${c}${me?' me':''}"/>`}
+ pk.innerHTML=h}
+
+/* ---------- panels ---------- */
+function kpisTraffic(){const rs=done.filter(r=>Date.now()-r.end<10000),ok=rs.filter(r=>cls(r)==='ok').length,ifa=rs.filter(r=>r.zone==='ifa').length;
+ return [['b',(rs.length/10).toFixed(1),'requests / s'],['g',rs.length?Math.round(ok/rs.length*100)+'%':'–','success'],['',pct(rs,.95).toFixed(0)+' ms','p95 latency'],['p',`${ifa}:${rs.length-ifa}`,'IFA : non-IFA, 10 s'],['r',errs(rs),'4xx + 5xx, 10 s']]}
+function renderTrace(){const r=S.selReq;if(!r){setHTML($('#trace'),'<p class="mute">Send a request, or click a line in the log, to see each hop it took.</p>');return}
+ const c=cls(r);
+ setHTML($('#trace'),`<div class="th"><span class="chip ${c}">${stLabel(r)}</span><span class="chip ${r.zone==='ifa'?'zi':'zn'}">${r.zone==='ifa'?'IFA':'non-IFA'}</span>${r.method} ${r.host}${r.path}</div>
+ <p class="mute">From ${r.c.name} (${r.c.ip}, ${r.c.where}) · ${r.ms.toFixed(1)} ms simulated · request ID ${r.rid}</p>
+ <ol class="hops">${r.hops.map((h,i)=>`<li class="${h.bad||''}"><span class="hk">${i+1} · ${h.k}</span><div><b>${h.title}</b><p>${h.text}</p></div><span class="ms">+${h.ms<10?h.ms.toFixed(1):h.ms.toFixed(0)} ms</span></li>`).join('')}</ol>
+ ${r.hdr?`<h4>Headers the pod receives</h4><pre>${r.hdr.split('\n').map(l=>{const[a,...b]=l.split(': ');return `<span class="k">${a}</span>: <span class="v">${b.join(': ')}</span>`}).join('\n')}</pre>`:'<h4>This request never reached a pod</h4>'}`)}
+const dl=rows=>`<dl>${rows.map(([a,b])=>`<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>`;
+function lbInsp(cl){const ext=cl==='ext',w=ext?'external':'internal';
+ return `<h3>${ext?'External':'Internal'} load balancer</h3><p class="mute">Service ingress-nginx-${w} · type LoadBalancer · ${ext?'34.120.8.10 (public)':'10.0.0.50 (private, annotation load-balancer-type: internal)'} · externalTrafficPolicy: ${S.policy}</p>
+ <table><tr><th>TARGET</th><th>HEALTH</th></tr>${nodes.map(n=>`<tr><td>${n.id}:${ext?30443:31443}</td><td>${n.state==='down'?'Removed, node down':n.state==='failing'?'Checks failing, still receiving':S.policy==='Local'&&!hasIng(n,cl)?`503: no local ${w} ingress pod`:'Healthy'}</td></tr>`).join('')}</table>
+ <p>${ext?'Only reachable through the CDN / WAF: a firewall rule allows 443 from the edge ranges alone, so nobody can bypass the WAF by hitting the LB directly.':'It has no public IP at all. Only the corporate network, VPN and peered data centres can route to it.'}</p>
+ <p>${S.policy==='Local'?'Local: only nodes that run an ingress pod of this class get traffic, and the client address is preserved.':'Cluster: every node gets traffic and kube-proxy forwards it. Load spreads evenly, but traffic can take an extra hop and the source address is SNATed.'}</p>`}
+function renderInsp(){const s=S.sel,el=$('#insp');if(!s){setHTML(el,'<p class="mute">Click any box on the map.</p>');return}const id=s.id;let h='';
+ if(s.k==='client'){const c=clients.find(x=>x.id===id),rs=recent(id),seen=[...new Set(rs.map(r=>r.src).filter(Boolean))];
+  h=`<h3>${c.name}</h3><p class="mute">${c.where} · ${c.zone==='ifa'?'public':'private'} IP ${c.ip} · ${c.zone==='ifa'?'IFA':'non-IFA'} client</p>${dl([['requests_10s',rs.length],['errors_10s',errs(rs)],['ingress_saw',seen.join(', ')||'–']])}
+  <p>${c.zone==='ifa'?'Internet clients can only resolve public names. Try sending it to ops.corp.internal.':'Internal clients reach internal apps through the private load balancer. If they call a public name, they leave through the corporate egress proxy and come back through the WAF like any customer.'}</p>
+  <button class="btn" data-act="send" data-id="${id}">Send a request from here</button>`}
+ else if(s.k==='pdns')h=`<h3>Public DNS</h3><p class="mute">shop.example.com CNAME shop.example.com.cdn-edge.net</p><p>Only IFA apps get public records. The answer is the CDN / WAF edge, so the origin load balancer address stays private. Names under corp.internal are not published here, which is why the internet gets NXDOMAIN for them.</p>`;
+ else if(s.k==='idns')h=`<h3>Corporate DNS</h3><p class="mute">Private zone corp.internal → 10.0.0.50</p><p>Split-horizon DNS: internal resolvers answer for internal-only names and forward everything else to the public DNS. Non-IFA apps exist only here.</p>`;
+ else if(s.k==='waf'){const rs=recent('waf');h=`<h3>CDN / WAF edge</h3><p class="mute">IFA only · egress ranges 130.211.0.0/22</p>${dl([['requests_10s',rs.length],['blocked_10s',rs.filter(r=>r.status===403).length],['tls','public cert *.example.com'],['rules','OWASP CRS, bot score, rate, geo']])}<p>Everything internet-facing passes here first. It terminates TLS, filters attacks, caches static files and sends clean traffic to the external load balancer with the client IP in X-Forwarded-For. Non-IFA traffic never touches it.</p>`}
+ else if(s.k==='elb'||s.k==='ilb')h=lbInsp(s.k==='elb'?'ext':'int');
+ else if(s.k==='node'){const n=N(id),ps=pods.filter(p=>p.node===id),rs=recent(id);
+  h=`<h3>${id}</h3><p class="mute">${n.ip} · ${n.state==='ready'?'Ready':n.state==='failing'?'Not responding':'NotReady'}</p>${dl([['external_ingress',hasIng(n,'ext')?'yes':'none'],['internal_ingress',hasIng(n,'int')?'yes':'none'],['traffic_10s',rs.length]])}
+  <table><tr><th>POD</th><th>STATE</th></tr>${ps.map(p=>`<tr><td>${p.id}</td><td>${n.state!=='ready'?'Unknown':p.state}</td></tr>`).join('')}</table>
+  ${n.state==='ready'?`<button class="btn danger" data-act="fail" data-id="${id}">Simulate node failure</button>`:`<button class="btn" data-act="recover" data-id="${id}">Recover node</button>`}
+  <p class="mute" style="margin-top:10px">In a real cluster the Deployments would reschedule these pods onto healthy nodes after the eviction timeout.</p>`}
+ else if(s.k==='ing'){const g=ings.find(i=>i.id===id),ext=g.cls==='ext',rs=recent(id),lg=logs.filter(l=>l.req&&l.req.ing===id).slice(0,4);
+  const y=ext?`apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: shop\n  annotations:\n    nginx.ingress.kubernetes.io/ssl-redirect: "true"${S.rl?'\n    nginx.ingress.kubernetes.io/limit-rps: "5"':''}\nspec:\n  ingressClassName: nginx-external\n  tls:\n  - hosts: [shop.example.com]\n    secretName: shop-example-tls\n  rules:\n  - host: shop.example.com\n    http:\n      paths:\n      - path: /api\n        pathType: Prefix\n        backend: {service: {name: api-svc, port: {number: 80}}}\n      - path: /\n        pathType: Prefix\n        backend: {service: {name: web-svc, port: {number: 80}}}`
+   :`apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: ops-internal\nspec:\n  ingressClassName: nginx-internal\n  tls:\n  - hosts: [ops.corp.internal, api.corp.internal]\n    secretName: corp-internal-ca-tls\n  rules:\n  - host: ops.corp.internal\n    http:\n      paths:\n      - path: /\n        pathType: Prefix\n        backend: {service: {name: ops-svc, port: {number: 80}}}\n  - host: api.corp.internal\n    http:\n      paths:\n      - path: /\n        pathType: Prefix\n        backend: {service: {name: api-svc, port: {number: 80}}}`;
+  h=`<h3>${id}</h3><p class="mute">Pod ${g.ip} on ${g.node} · class ${ext?'nginx-external (IFA)':'nginx-internal (non-IFA)'}</p>${dl([['requests_10s',rs.length],['errors_10s',errs(rs)],['p50_p95',`${pct(rs,.5).toFixed(0)} / ${pct(rs,.95).toFixed(0)} ms`],['real_ip',ext?'from X-Forwarded-For (trusted edge)':'TCP source only'],['canary_weight',ext?S.canary+'%':'n/a']])}
+  <p>Two ingress controllers, two classes: an Ingress object is only picked up by the controller whose class it names. That is how one cluster keeps internet-facing and internal apps strictly separate.</p>
+  <h4>${ext?'shop':'ops-internal'}.ingress.yaml</h4><pre>${yaml(y)}</pre>
+  <h4>tail -n 4</h4><pre>${lg.map(l=>`${l.req.src} "${l.req.method} ${l.req.path}" ${stLabel(l.req)} ${l.req.ms.toFixed(0)}ms`).join('\n')||'No traffic yet'}</pre>`}
+ else if(s.k==='svc'){const v=SV(id);h=`<h3>${id}</h3><p class="mute">ClusterIP ${v.ip}:80 → targetPort 8080 · selector ${v.sel}</p>
+  <table><tr><th>ENDPOINT</th><th>NODE</th><th>READY</th></tr>${pods.filter(p=>p.svc===id).map(p=>`<tr><td>${p.ip}:8080<br><span class="mute">${p.id}</span></td><td>${p.node}</td><td>${inEp(p)?(p.state==='crashing'?'yes, but crashed':'yes'):'no'}</td></tr>`).join('')}</table>
+  <p>A Service is a stable name, a virtual IP and a list of endpoints. ingress-nginx skips the ClusterIP and balances across these pod IPs itself. Pods calling each other (east-west traffic) use the ClusterIP through CoreDNS: ${id}.shop.svc.cluster.local.</p>`}
+ else if(s.k==='pod'){const p=PD(id),rs=recent(id);h=`<h3>${id}</h3><p class="mute">${p.ip} on ${p.node} · behind ${p.svc}</p>${dl([['state',N(p.node).state!=='ready'?'Unknown':p.state],['restarts',p.restarts],['served_10s',rs.length],['p50',pct(rs,.5).toFixed(0)+' ms'],['readinessProbe','GET /healthz every 1 s, failureThreshold 3']])}
+  <button class="btn danger" data-act="kill" data-id="${id}" ${p.state!=='ready'||N(p.node).state!=='ready'?'disabled':''}>Crash this pod</button>
+  <p class="mute" style="margin-top:10px">Requests that hit it in the 3 seconds before the probe fails get a 502. After that it leaves the endpoints and traffic routes around it.</p>`}
+ setHTML(el,h)}
+$('#insp').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act,id=b.dataset.id;
+ if(a==='send'){const c=clients.find(c=>c.id===id);send(c,'GET',c.zone==='ifa'?'shop.example.com':'ops.corp.internal','/',{select:true})}
+ if(a==='kill')killPod(id);if(a==='fail')failNode(id);if(a==='recover')recoverNode(id);renderInsp()});
+function renderLog(){const f=S.flt.toLowerCase();
+ const rows=logs.filter(l=>!f||(l.ev?l.text:[l.req.src,l.req.c.ip,l.req.method,l.req.host+l.req.path,stLabel(l.req),l.req.via,l.req.svc,l.req.pod,l.req.ing,l.req.zone==='ifa'?'ifa waf':'non-ifa internal'].join(' ')).toLowerCase().includes(f)).slice(0,150);
+ setHTML($('#log'),rows.map(l=>{if(l.ev)return `<div class="ll ev ${l.lvl}"><span class="c">${ts(l.t)}</span><span class="w">${l.text}</span></div>`;const r=l.req;
+  return `<div class="ll ${cls(r)}${r===S.selReq?' on':''}" data-rid="${r.rid}"><span class="c">${ts(r.end)}</span><span class="z ${r.zone}">${r.zone==='ifa'?'IFA    ':'non-IFA'}</span><span class="ip">${r.src||r.c.ip}</span><span>"${r.method} ${r.host}${r.path}"</span><span class="st">${stLabel(r)}</span><span class="ms2">${r.ms.toFixed(0)}ms</span><span class="c">${r.ing?r.ing+' → ':''}${r.pod?r.svc+'/'+r.pod:r.svc||(r.status===403?'blocked at WAF':r.status==='NXDOMAIN'?'no public DNS record':'–')}</span></div>`}).join('')||'<div class="ll ev">No matching lines</div>')}
+$('#log').addEventListener('click',e=>{const d=e.target.closest('[data-rid]');if(!d)return;S.selReq=ridMap[d.dataset.rid];renderTrace();renderLog()});
+$('#flt').addEventListener('input',e=>{S.flt=e.target.value;renderLog()});
+
+const note=t=>{$('#note').textContent=t};
+function sync(){$('#live').setAttribute('aria-pressed',S.live);$('#live').textContent=S.live?'Live traffic on':'Live traffic off';
+ document.querySelectorAll('[data-pol]').forEach(b=>{b.classList.toggle('on',b.dataset.pol===S.policy);b.setAttribute('aria-pressed',b.dataset.pol===S.policy)});
+ $('#canary').value=S.canary;$('#canaryo').textContent=S.canary+'%';$('#rl').checked=S.rl;$('#rate').value=S.rate;$('#rateo').textContent=S.rate+' req/s';$('#speedo').textContent=S.speed+'×';draw();renderInsp()}
+$('#live').onclick=()=>{S.live=!S.live;sync()};
+$('#rate').oninput=e=>{S.rate=+e.target.value;sync()};
+$('#speed').oninput=e=>{S.speed=+e.target.value;sync()};
+$('#canary').oninput=e=>{S.canary=+e.target.value;sync()};
+$('#rl').onchange=e=>{S.rl=e.target.checked;sync()};
+document.querySelectorAll('[data-pol]').forEach(b=>b.onclick=()=>{S.policy=b.dataset.pol;sync();note(S.policy==='Local'?'Local: nodes without an ingress pod of the right class fail the health check (node-c for external, node-a for internal). No SNAT, so the internal ingress now logs real client IPs.':'Cluster: every node takes traffic on both load balancers, and every packet is SNATed to a node IP before it reaches nginx. IFA traffic still has the real client in X-Forwarded-For. Non-IFA traffic loses it.')});
+$('#fc').innerHTML=clients.map(c=>`<option value="${c.id}">${c.name} · ${c.ip}</option>`).join('');
+const form=()=>[clients.find(c=>c.id===$('#fc').value),$('#fm').value,$('#fh').value,$('#fp').value];
+$('#go').onclick=()=>send(...form(),{select:true});
+$('#burst').onclick=()=>{const f=form();for(let i=0;i<15;i++)setTimeout(()=>{const r=send(...f);if(i===14){S.selReq=r;renderTrace()}},i*45)};
+const burst=(c,host,path)=>{for(let i=0;i<15;i++)setTimeout(()=>{const r=send(c,'GET',host,path);if(i===14){S.selReq=r;renderTrace()}},i*40)};
+const tries=[
+ ['Where did my IP go?',()=>{S.policy='Cluster';S.sel={k:'ing',id:'nginx-internal-b'};sync();send(clients[3],'GET','ops.corp.internal','/accounts',{node:'node-a',select:true});
+  note('The teller (10.20.4.15) went through the internal LB to node-a, which has no internal ingress pod. kube-proxy forwarded and SNATed it, so nginx-internal logs 10.0.1.11. There is no WAF header to fall back on. Switch to Local and send again.')}],
+ ['Internet → internal app',()=>{send(clients[0],'GET','ops.corp.internal','/',{select:true});S.sel={k:'pdns',id:'pdns'};sync();note('A browser on the internet asked for ops.corp.internal. Public DNS has no record, so it gets NXDOMAIN. Non-IFA apps have no public name, no public LB and no external Ingress.')}],
+ ['WAF blocks SQL injection',()=>{send(clients[1],'GET','shop.example.com',"/products?id=1' OR '1'='1",{select:true});S.sel={k:'waf',id:'waf'};sync();note('The WAF matched a SQL-injection rule and returned 403 at the edge. The request never reached the load balancer, so the cluster logs nothing.')}],
+ ['Crash a web pod',()=>{killPod('web-7f9c-a1');S.sel={k:'pod',id:'web-7f9c-a1'};S.rate=Math.max(S.rate,6);sync();note('web-7f9c-a1 crashed. Watch for red 502s for about 3 seconds until the readiness probe fails, then traffic routes around it. It rejoins after about 10 seconds.')}],
+ ['30% canary',()=>{S.canary=30;S.sel={k:'svc',id:'web-canary-svc'};sync();note('30% of IFA web traffic now goes to web-canary-svc (orange). It is slower and fails about 6% of the time. The rollouts.yaml tab shows canary and five other strategies step by step.')}],
+ ['Trip the rate limit',()=>{S.rl=true;S.sel={k:'ing',id:'nginx-external-a'};sync();burst(clients[2],'shop.example.com','/api/orders');note('The partner sent 15 requests in under a second, and everything after the 5th got a 429. On the external class the limit keys on the real client IP from X-Forwarded-For.')}],
+ ['Lose node-b',()=>{failNode('node-b');S.sel={k:'elb',id:'elb'};S.rate=Math.max(S.rate,6);sync();note('node-b ran an external and an internal ingress pod, plus the only canary. Connections sent there time out until both LBs drop it after 2.5 seconds.')}],
+ ['Unknown host',()=>{send(clients[1],'GET','admin.example.com','/',{select:true});note('No Ingress rule matches admin.example.com, so nginx-external answers with 404 from its default backend.')}]];
+$('#try').insertAdjacentHTML('beforeend',tries.map((t,i)=>`<button data-try="${i}"><kbd>${i+1}</kbd>${t[0]}</button>`).join(''));
+$('#try').addEventListener('click',e=>{const b=e.target.closest('[data-try]');if(b)tries[+b.dataset.try][1]()});
+
+/* =====================================================================
+   ROLLOUTS VIEW
+   ===================================================================== */
+const STR={
+ recreate:{name:'Recreate',kind:'Deployment',blurb:'Kill every old pod, then start the new ones. Simple, and the only option when two versions can never run at the same time (for example an incompatible database schema). The cost is a guaranteed outage between the two.',
+  good:'Dev and test environments, singletons, apps that cannot run two versions at once',risk:'Downtime on every deploy',
+  steps:['Scale the v1 ReplicaSet to 0','Wait for every v1 pod to terminate (users get 503)','Scale the v2 ReplicaSet to N','Wait for v2 pods to pass readiness'],
+  yaml:`apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: {N}\n  strategy:\n    type: Recreate\n  template:\n    spec:\n      containers:\n      - name: app\n        image: registry/web:v2`},
+ rolling:{name:'Rolling update',kind:'Deployment',blurb:'The Kubernetes default. The Deployment creates a new ReplicaSet and swaps pods a few at a time. maxSurge caps how many extra pods may exist, and maxUnavailable caps how many may be missing. Both versions serve users at the same time, and only the readiness probe gates progress, not error rates.',
+  good:'Most stateless services',risk:'Mixed versions mid-rollout; a buggy build that passes readiness rolls out everywhere',
+  steps:['Create up to maxSurge extra v2 pods','When a v2 pod is Ready, terminate a v1 pod (never fewer than N − maxUnavailable Ready)','Repeat until every pod runs v2','The old ReplicaSet stays at 0 replicas for rollout undo'],
+  yaml:`apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: {N}\n  progressDeadlineSeconds: 600\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxSurge: {S}\n      maxUnavailable: {U}\n  template:\n    spec:\n      containers:\n      - name: app\n        image: registry/web:v2\n        readinessProbe:\n          httpGet: {path: /healthz, port: 8080}\n          periodSeconds: 1\n          failureThreshold: 3`},
+ bluegreen:{name:'Blue / green',kind:'Argo Rollout',blurb:'Run a complete copy of the new version (green) next to the old one (blue). Users stay on blue through the web-active Service while tests hit green through web-preview. Promotion is one selector change: 100% of traffic moves at once, and moving back is just as fast.',
+  good:'Releases that need instant cut-over and instant rollback',risk:'Double the pods during the release; no gradual exposure',
+  steps:['Blue (v1) serves 100% through web-active','Create a full green (v2) stack behind web-preview','Run smoke tests against web-preview','Switch the web-active selector to green: 100% at once','Keep blue warm for scaleDownDelaySeconds, then scale it down'],
+  yaml:`apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: web\nspec:\n  replicas: {N}\n  strategy:\n    blueGreen:\n      activeService: web-active\n      previewService: web-preview\n      autoPromotionEnabled: true\n      prePromotionAnalysis:\n        templates:\n        - templateName: smoke-tests\n      scaleDownDelaySeconds: 30`},
+ canary:{name:'Canary',kind:'Argo Rollout',blurb:'Send a small, growing share of real traffic to v2 while measuring it. After each weight step an analysis checks the canary error rate. If it is too high, the rollout aborts and all traffic returns to stable. Only a slice of users ever meets a bad build.',
+  good:'High-traffic services where real traffic is the best test',risk:'Needs good metrics; slower release',
+  steps:['setWeight 10 → pause → analysis (error rate < 5%)','setWeight 25 → pause → analysis','setWeight 50 → pause → analysis','Promote: 100% to v2, scale v1 down'],
+  yaml:`apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: web\nspec:\n  replicas: {N}\n  strategy:\n    canary:\n      stableService: web-stable\n      canaryService: web-canary\n      trafficRouting:\n        nginx:\n          stableIngress: web\n      steps:\n      - setWeight: 10\n      - pause: {duration: 2m}\n      - analysis:\n          templates:\n          - templateName: error-rate   # < 5% 5xx\n      - setWeight: 25\n      - pause: {duration: 2m}\n      - setWeight: 50\n      - pause: {duration: 2m}`},
+ ab:{name:'A/B testing',kind:'canary Ingress',blurb:'Route by who the user is, not by a random percentage. Users carrying a header or cookie (here X-Beta: true, about 25% of users) always get v2, and everyone else gets v1. The decision is a business metric such as conversion, not only errors.',
+  good:'Product experiments, beta programmes, internal dog-fooding',risk:'Needs an identity signal; small groups give noisy results',
+  steps:['Deploy v2 next to v1','Users with X-Beta: true (25%) go to v2','Compare conversion between the two groups','Promote the winner or roll back'],
+  yaml:`apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: web-beta\n  annotations:\n    nginx.ingress.kubernetes.io/canary: "true"\n    nginx.ingress.kubernetes.io/canary-by-header: X-Beta\n    nginx.ingress.kubernetes.io/canary-by-header-value: "true"\nspec:\n  ingressClassName: nginx-external\n  rules:\n  - host: shop.example.com\n    http:\n      paths:\n      - path: /\n        pathType: Prefix\n        backend: {service: {name: web-v2, port: {number: 80}}}`},
+ shadow:{name:'Shadow (mirroring)',kind:'Ingress mirror',blurb:'Copy every live request to v2 and throw its responses away. Users only ever see v1, so v2 can fail as much as it likes while you compare its errors and latency against real production traffic. Requests with side effects (payments, emails) must be made safe first.',
+  good:'Rewrites and risky refactors of read-heavy services',risk:'Doubles load; dangerous for non-idempotent writes',
+  steps:['Deploy v2 next to v1','Mirror a copy of every request to v2','Discard v2 responses (users only see v1)','Compare v2 errors and latency','Promote, or remove v2 with zero user impact'],
+  yaml:`apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: web\n  annotations:\n    nginx.ingress.kubernetes.io/mirror-target: >-\n      http://web-v2.shop.svc.cluster.local$request_uri\n    nginx.ingress.kubernetes.io/mirror-request-body: "on"\nspec:\n  ingressClassName: nginx-external`}};
+const SKEYS=Object.keys(STR);
+const D={strategy:'rolling',N:4,surge:1,unav:0,mode:'ok',speed:1,state:'idle',paused:false,t:0,pods:[],w:0,active:'v1',ab:false,mirror:false,smoke:false,s:0,k:0,hl:-1,hist:[],evs:[],phase:'',last:{},rstat:''};
+const rnd=()=>Math.random().toString(36).slice(2,7);
+const RS={v1:'web-7f9c',v2:'web-86d4'};
+const alive=v=>D.pods.filter(p=>p.ver===v&&p.st!=='term');
+const ready=v=>D.pods.filter(p=>p.ver===v&&p.st==='ready');
+const dlog=(t,l='')=>{D.evs.unshift({t:D.t,text:t,l});if(D.evs.length>200)D.evs.pop()};
+const phase=t=>{D.phase=t};
+function mk(v,st='pending'){const p={id:`${RS[v]}-${rnd()}`,ver:v,st,age:0,node:['node-a','node-b','node-c'][Math.random()*3|0]};D.pods.push(p);if(st==='pending')dlog(`Normal  SuccessfulCreate  replicaset/${RS[v]}: created pod ${p.id}`);return p}
+function scale(v,n){let a=alive(v);while(a.length<n){mk(v);a=alive(v)}if(a.length>n){const rank={pending:0,creating:1,starting:2,crash:2,ready:3};a.sort((x,y)=>rank[x.st]-rank[y.st]||y.age-x.age).slice(0,a.length-n).forEach(p=>{p.st='term';p.age=0;dlog(`Normal  Killing  pod/${p.id}: stopping container app (SIGTERM, preStop, drain)`,'warn')})}}
+function dReset(){Object.assign(D,{state:'idle',paused:false,t:0,pods:[],w:0,active:'v1',ab:false,mirror:false,smoke:false,s:0,k:0,hl:-1,hist:[],evs:[],last:{}});for(let i=0;i<D.N;i++)mk('v1','ready');
+ dlog(`Normal  ScalingReplicaSet  deployment/web: ${RS.v1} (v1) at ${D.N} replicas, all Ready`,'good');phase(`Stable: ${D.N} v1 pods serve 100% of traffic. Pick a strategy and press Deploy v2.`);D.rstat='deployment "web" successfully rolled out';sample();renderD()}
+function lifecycle(){for(let i=D.pods.length-1;i>=0;i--){const p=D.pods[i];p.age++;
+ if(p.st==='pending'&&p.age>=1){p.st='creating';p.age=0;dlog(`Normal  Scheduled  pod/${p.id}: assigned to ${p.node}`)}
+ else if(p.st==='creating'&&p.age>=2){p.st='starting';p.age=0;dlog(`Normal  Started  pod/${p.id}: pulled registry/web:${p.ver}, container started`)}
+ else if(p.st==='starting'&&p.age>=2){if(p.ver==='v2'&&D.mode==='readiness'){p.st='crash';dlog(`Warning  Unhealthy  pod/${p.id}: Readiness probe failed: HTTP 500 (missing config DB_URL)`,'warn')}else{p.st='ready';dlog(`Normal  Ready  pod/${p.id}: readiness probe passed, added to endpoints`,'good')}p.age=0}
+ else if(p.st==='crash'&&p.age%4===0)dlog(`Warning  BackOff  pod/${p.id}: Back-off restarting failed container`,'warn');
+ else if(p.st==='term'&&p.age>=2)D.pods.splice(i,1)}}
+function finishD(t){D.state='done';phase(t);dlog('Normal  RolloutCompleted  rollout finished','good')}
+function stuck(t){D.state='stuck';phase(t);dlog('Warning  ProgressDeadlineExceeded  deployment/web: ReplicaSet has timed out progressing','warn');D.rstat='error: deployment "web" exceeded its progress deadline'}
+function abort(t){D.state='aborted';D.w=0;D.ab=false;D.mirror=false;D.smoke=false;D.active='v1';scale('v2',0);if(alive('v1').length<D.N)scale('v1',D.N);phase(t);dlog('Warning  RolloutAborted  rollout aborted, traffic returned to stable v1','warn');D.rstat='rollout aborted: stable v1 serving 100%'}
+function undo(){if(D.state==='idle')return;D.state='undo';D.w=0;D.ab=false;D.mirror=false;D.smoke=false;D.active='v1';scale('v1',D.N);dlog('Normal  DeploymentRollback  kubectl rollout undo deployment/web → revision 1 (v1)','good');phase('Rolling back: v1 pods come back, then v2 is removed.');renderD()}
+const v2err=()=>{const h=D.hist.slice(-3);const n=h.reduce((a,x)=>a+x.v2n,0);return n?h.reduce((a,x)=>a+x.v2e,0)/n:0};
+function ctrl(){const N=D.N,s=D.strategy,r2=ready('v2').length;D.k++;
+ if(D.state==='undo'){if(ready('v1').length>=N){scale('v2',0);if(!D.pods.some(p=>p.ver==='v2')){D.state='done';phase('Rolled back. v1 serves 100% again; v2 pods are gone.');D.rstat='deployment "web" rolled back to revision 1'}}return}
+ if(D.state!=='running')return;
+ if(s==='recreate'){
+  if(D.s===0){scale('v1',0);dlog(`Normal  ScalingReplicaSet  scaled down ${RS.v1} (v1) to 0`,'warn');D.s=1;D.hl=0;phase('Every v1 pod is terminating at once. Users get 503 from now until v2 is Ready: this is the outage.')}
+  else if(D.s===1){D.hl=1;if(!D.pods.some(p=>p.ver==='v1')){scale('v2',N);dlog(`Normal  ScalingReplicaSet  scaled up ${RS.v2} (v2) to ${N}`);D.s=2;D.k=0;D.hl=2}}
+  else{D.hl=3;D.rstat=`Waiting for deployment "web" rollout to finish: ${r2} of ${N} updated replicas are available...`;
+   if(r2===N)finishD('Done. Every pod runs v2. The red dip in the chart is the outage window that Recreate always causes.');
+   else if(D.mode==='readiness'&&D.k>14)stuck('v2 never became Ready and v1 is already gone, so this is a full outage until you run rollout undo.')}}
+ else if(s==='rolling'){
+  if(D.s===0){dlog(`Normal  ScalingReplicaSet  deployment/web image registry/web:v1 → v2 (maxSurge ${D.surge}, maxUnavailable ${D.unav})`);D.s=1;D.k=0}
+  const oA=alive('v1').length,nA=alive('v2').length,rd=ready('v1').length+r2;
+  const want=Math.min(N,N+D.surge-oA);if(want>nA){scale('v2',want);dlog(`Normal  ScalingReplicaSet  scaled up ${RS.v2} (v2) to ${want}`)}
+  const kill=Math.min(oA,Math.max(0,rd-(N-D.unav)));if(kill>0){scale('v1',oA-kill);dlog(`Normal  ScalingReplicaSet  scaled down ${RS.v1} (v1) to ${oA-kill}`)}
+  D.hl=r2===0?0:r2<N?1:2;D.rstat=`Waiting for deployment "web" rollout to finish: ${r2} of ${N} updated replicas are available...`;
+  if(r2===N&&!D.pods.some(p=>p.ver==='v1')){D.hl=3;finishD(D.mode==='bug'?'Rollout "succeeded", but v2 fails about 30% of requests and now serves everyone. A Deployment only checks readiness, not error rates, so nothing stopped it. Run rollout undo, or use canary with analysis.':'Done. Note how both versions served users at the same time in the middle of the rollout.')}
+  else if(D.mode==='readiness'&&D.k>16)stuck(`v2 pods fail readiness, so the rollout stopped. With maxUnavailable ${D.unav}, ${ready('v1').length} of ${N} v1 pods are still serving${D.unav===0?', at full capacity':''}. Kubernetes never removes Ready pods it cannot replace.`)}
+ else if(s==='bluegreen'){
+  if(D.s===0){scale('v2',N);dlog(`Normal  ScalingReplicaSet  green ${RS.v2} (v2) scaled to ${N} behind web-preview`);D.s=1;D.k=0;D.hl=1;phase('Green (v2) is starting next to blue. Users still see only blue through web-active.')}
+  else if(D.s===1){if(r2===N){D.s=2;D.k=0;D.smoke=true;D.hl=2;dlog('Normal  AnalysisRunStarted  pre-promotion analysis smoke-tests against web-preview');phase('Smoke tests are hitting green through web-preview (yellow dots). Users still see only blue.')}
+   else if(D.mode==='readiness'&&D.k>14)abort('Green never became Ready, so it was never promoted. Blue kept serving the whole time. Users were not affected.')}
+  else if(D.s===2){if(D.k>=4){D.smoke=false;if(D.mode==='bug'){abort('Smoke tests found v2 failing about 30% of requests, so the switch never happened. Green was deleted and users never saw it.')}else{D.s=3;D.k=0;D.active='v2';D.hl=3;dlog('Normal  RolloutPromoted  web-active selector → rollouts-pod-template-hash of green: 100% of traffic switched at once','good');phase('Switched. web-active now points at green: 100% of users moved in one step. Blue stays warm in case you need to switch back.')}}}
+  else if(D.s===3){D.hl=4;if(D.k>=5){scale('v1',0);dlog(`Normal  ScalingReplicaSet  scaleDownDelaySeconds elapsed: blue ${RS.v1} scaled to 0`);D.s=4}}
+  else if(!D.pods.some(p=>p.ver==='v1'))finishD('Done. Green is the new blue. The next release will deploy into a fresh green.');
+  D.rstat=`active: ${D.active==='v1'?'blue (v1)':'green (v2)'} · preview: green (v2) ${r2}/${N} ready`}
+ else if(s==='canary'){const W=[10,25,50];
+  if(D.s<3){const w=W[D.s],need=Math.max(1,Math.ceil(N*w/100));D.hl=D.s;
+   if(alive('v2').length<need){scale('v2',need);dlog(`Normal  ScalingReplicaSet  canary ${RS.v2} (v2) scaled to ${need}`)}
+   if(r2>=need&&D.w!==w&&D.k>0){D.w=w;D.k=0;dlog(`Normal  SetWeight  canary-weight: ${w} on Ingress web-canary`);phase(`Step ${D.s+1}: ${w}% of users now reach v2. Pausing and measuring the canary error rate.`)}
+   else if(D.w===w&&D.k>=4){const e=v2err();dlog(`Normal  AnalysisRun  error-rate on canary = ${(e*100).toFixed(1)}% (limit 5%) → ${e>.05?'Failed':'Successful'}`,e>.05?'warn':'good');
+    if(e>.05)abort(`Analysis caught a ${(e*100).toFixed(0)}% canary error rate at ${w}% weight and aborted. Only that slice of users saw errors, briefly. Stable v1 now has 100% again.`);else{D.s++;D.k=0}}
+   else if(D.mode==='readiness'&&D.k>14&&r2<need)abort('The canary pod never became Ready, so the weight never moved off 0%. Rollout aborted with zero user impact.')}
+  else if(D.s===3){D.hl=3;if(alive('v2').length<N)scale('v2',N);if(r2===N){D.w=100;D.active='v2';scale('v1',0);dlog('Normal  RolloutPromoted  canary promoted: v2 is the new stable','good');D.s=4}}
+  else if(!D.pods.some(p=>p.ver==='v1'))finishD('Done. v2 passed every analysis step and is now stable.');
+  D.rstat=`canary weight ${D.w}% · canary pods ${r2} ready · v2 error rate ${(v2err()*100).toFixed(1)}%`}
+ else if(s==='ab'||s==='shadow'){const ab=s==='ab';
+  if(D.s===0){D.hl=0;if(alive('v2').length<2){scale('v2',2);dlog(`Normal  ScalingReplicaSet  ${RS.v2} (v2) scaled to 2`)}if(r2>=2){D.s=1;D.k=0;if(ab)D.ab=true;else D.mirror=true;D.hl=1;dlog(ab?'Normal  Ingress  canary-by-header X-Beta enabled':'Normal  Ingress  mirror-target → web-v2 enabled');phase(ab?'Users with X-Beta: true (about 25%) now always get v2. Everyone else stays on v1.':'Every live request is now copied to v2 (dashed dots). v2 responses are thrown away, so users only see v1.')}
+   else if(D.mode==='readiness'&&D.k>14)abort('v2 never became Ready, so no traffic was ever sent to it.')}
+  else if(D.s===1){D.hl=2;if(D.k>=8){const e=v2err();
+   if(ab){const c1=3.1+Math.random()*.2,c2=D.mode==='bug'?2.1:3.6+Math.random()*.2;dlog(`Normal  Experiment  conversion v1 ${c1.toFixed(2)}% vs v2 ${c2.toFixed(2)}% · v2 errors ${(e*100).toFixed(1)}%`,c2>c1?'good':'warn');
+    if(c2<=c1||e>.05){abort(`The beta group converted worse on v2 (${c2.toFixed(1)}% vs ${c1.toFixed(1)}%) and saw errors, so v2 lost the experiment. Only beta users were affected.`);return}}
+   else{dlog(`Normal  Analysis  shadow v2 error rate ${(e*100).toFixed(1)}%, users unaffected`,e>.05?'warn':'good');if(e>.05){abort(`v2 failed ${(e*100).toFixed(0)}% of mirrored requests, but every user got their answer from v1. Zero user impact: that is the point of shadowing.`);return}}
+   D.s=2;D.hl=3;D.ab=false;D.mirror=false;scale('v2',N);phase('v2 won. Scaling it to full size before switching all traffic.')}}
+  else if(D.s===2){if(r2===N){D.active='v2';scale('v1',0);dlog('Normal  Promoted  v2 serves 100%','good');D.s=3}}
+  else if(!D.pods.some(p=>p.ver==='v1'))finishD(ab?'Done. The experiment chose v2 and it now serves everyone.':'Done. v2 proved itself on mirrored production traffic before any user touched it.');
+  D.rstat=ab?`beta routing ${D.ab?'on':'off'} · v2 pods ${r2} ready`:`mirroring ${D.mirror?'on':'off'} · v2 pods ${r2} ready · shadow error rate ${(v2err()*100).toFixed(1)}%`}
+}
+function pickD(){const r1=ready('v1'),r2=ready('v2'),s=D.strategy;let pool,beta=false;
+ if(s==='recreate'||s==='rolling')pool=[...r1,...r2];
+ else if(s==='bluegreen')pool=D.active==='v1'?r1:r2;
+ else if(s==='canary'){pool=(D.w>=100||(D.w>0&&Math.random()*100<D.w))&&r2.length?r2:r1;if(!pool.length)pool=r2}
+ else if(s==='ab'){beta=Math.random()<.25;pool=D.active==='v2'?r2:(D.ab&&beta&&r2.length?r2:r1)}
+ else pool=D.active==='v2'?r2:r1;
+ if(!pool.length&&D.active==='v2')pool=r2;
+ const pod=pool.length?pool[Math.random()*pool.length|0]:null;
+ const bad=p=>p&&p.ver==='v2'&&D.mode==='bug'&&Math.random()<.3;
+ const mirror=s==='shadow'&&D.mirror&&D.active==='v1'&&r2.length?r2[Math.random()*r2.length|0]:null;
+ return{pod,fail:!pod||bad(pod),mirror,mfail:bad(mirror),beta}}
+function sample(){let n=0,e=0,v2=0,v2n=0,v2e=0;for(let i=0;i<300;i++){const r=pickD();n++;if(r.fail)e++;if(r.pod&&r.pod.ver==='v2'){v2++;v2n++;if(r.fail)v2e++}if(r.mirror){v2n++;if(r.mfail)v2e++}}
+ if(D.smoke&&D.mode==='bug'){v2n+=20;v2e+=6}else if(D.smoke)v2n+=20;
+ D.hist.push({t:D.t,r1:ready('v1').length,r2:ready('v2').length,err:e/n*100,share:v2/n*100,v2err:v2n?v2e/v2n*100:0,v2n,v2e});if(D.hist.length>120)D.hist.shift()}
+function tick(){if(D.paused)return;D.t++;lifecycle();ctrl();sample();renderD()}
+let tickT=0;
+
+/* ---------- rollout drawing ---------- */
+const dst=$('#dst'),dpk=$('#dpk');
+const podXY=(p)=>{const list=D.pods.filter(x=>x.ver===p.ver),i=list.indexOf(p),top=p.ver==='v1'?20:270;return[560+(i%5)*114,top+52+Math.floor(i/5)*74]};
+const LBL={pending:'Pending',creating:'Creating',starting:'Running 0/1',ready:'Ready 1/1',crash:'CrashLoop',term:'Terminating'};
+const TIP={pending:'Pending: waiting for the scheduler to pick a node',creating:'ContainerCreating: pulling the image and starting the container',starting:'Running but not Ready: the readiness probe has not passed yet, so no traffic',ready:'Ready: passing readiness, listed in the Service endpoints, receiving traffic',crash:'CrashLoopBackOff: the readiness probe keeps failing, so it never gets traffic',term:'Terminating: removed from endpoints, draining in-flight requests, then SIGTERM'};
+function routerLines(){const s=D.strategy;
+ if(s==='recreate'||s==='rolling')return['Service web','selector: app=web','→ every Ready pod'];
+ if(s==='bluegreen')return['Service web-active',`selector → ${D.active==='v1'?'blue (v1)':'green (v2)'}`,'web-preview → green'];
+ if(s==='canary')return['Ingress web + canary',`canary-weight: ${D.w}`,`stable v1 · canary v2`];
+ if(s==='ab')return['Ingress web + canary','canary-by-header:',`X-Beta → v2 (${D.ab?'on':'off'})`];
+ return['Ingress web',`mirror-target → v2`,`mirroring ${D.mirror?'on':'off'}`]}
+function rsLabel(v){const s=D.strategy;if(s==='bluegreen')return v==='v1'?`blue · ${D.active==='v1'?'web-active':'idle'}`:`green · ${D.active==='v2'?'web-active':'web-preview'}`;
+ if(s==='canary')return v==='v1'?(D.active==='v1'?'stable':'old'):(D.active==='v2'?'stable':'canary');if(s==='ab')return v==='v1'?'control group':'beta group';if(s==='shadow')return v==='v1'?'serving users':(D.active==='v2'?'serving users':'shadow, responses discarded');return v==='v1'?'old ReplicaSet':'new ReplicaSet'}
+function drawD(){let h='';const last=D.hist[D.hist.length-1]||{share:0,err:0};
+ h+=box2(20,200,160,100,['Users','~10 dots / s',D.strategy==='ab'?'25% carry X-Beta':'real traffic']);
+ const rl=routerLines();h+=`<rect x="250" y="170" width="220" height="160" rx="8" fill="var(--card)" stroke="var(--pur)"/>`+rl.map((l,i)=>`<text x="264" y="${196+i*18}" class="${i?'s':'t'}">${l}</text>`).join('');
+ const sh=Math.round(last.share);h+=`<rect x="264" y="262" width="192" height="14" rx="3" fill="var(--blue)"/><rect x="${264+192*(1-sh/100)}" y="262" width="${192*sh/100}" height="14" rx="0" fill="var(--grn)"/>`;
+ h+=`<text x="264" y="296" class="s">v1 ${100-sh}% · v2 ${sh}%</text><text x="264" y="314" class="s${last.err>1?' bad':''}">user errors ${last.err.toFixed(1)}%</text>`;
+ if(D.strategy==='bluegreen')h+=box2(250,380,220,60,['Smoke tests',D.smoke?'running → web-preview':'idle']);
+ h+=`<line x1="180" y1="250" x2="250" y2="250" class="wire"/>`;
+ ['v1','v2'].forEach(v=>{const top=v==='v1'?20:270,a=alive(v).length,r=ready(v).length,on=D.pods.some(p=>p.ver===v);
+  h+=`<rect x="540" y="${top}" width="600" height="210" rx="10" class="rs ${v}${on?' on':''}"/><text x="556" y="${top+24}" class="rh ${v}">ReplicaSet ${RS[v]} · ${v} <tspan class="s">${rsLabel(v)}</tspan></text><text x="1126" y="${top+24}" text-anchor="end" class="s">desired ${a} · ready ${r}</text>`;
+  h+=`<line x1="470" y1="250" x2="540" y2="${top+105}" class="wire${r?'':' off'}"/>`;
+  if(!on)h+=`<text x="840" y="${top+118}" text-anchor="middle" class="s">0 replicas${v==='v1'?' (kept for rollout undo)':''}</text>`});
+ D.pods.forEach(p=>{const[x,y]=podXY(p);h+=`<g class="pd ${p.ver} ${p.st}"><title>${p.id} on ${p.node} · ${TIP[p.st]}</title><rect x="${x}" y="${y}" width="104" height="62" rx="6"/><text x="${x+9}" y="${y+22}" class="pl">${p.id.slice(-5)}</text><text x="${x+9}" y="${y+40}" class="ps">${LBL[p.st]}</text><text x="${x+9}" y="${y+55}" class="ps" style="fill:var(--mute)">${p.node}</text></g>`});
+ setHTML(dst,h)}
+function box2(x,y,w,hh,lines){return `<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="8" fill="var(--card)" stroke="var(--line)"/>`+lines.map((l,i)=>`<text x="${x+12}" y="${y+24+i*18}" class="${i?'s':'t'}">${l}</text>`).join('')}
+const dots=[],flashes=[];let dAcc=0;
+function frameD(dt){dAcc+=dt*D.speed*(D.paused?0:1);
+ while(dAcc>100){dAcc-=100;const r=pickD();
+  if(r.pod){const[x,y]=podXY(r.pod);dots.push({p:[[180,250],[360,250],[x+52,y+31]],c:r.pod.ver,fail:r.fail,d:0})}else dots.push({p:[[180,250],[360,250]],c:'no',fail:true,d:0});
+  if(r.mirror){const[x,y]=podXY(r.mirror);dots.push({p:[[360,250],[x+52,y+31]],c:'m',fail:r.mfail,d:0,silent:1})}
+  if(D.smoke&&Math.random()<.5){const g=ready('v2');if(g.length){const t=g[Math.random()*g.length|0],[x,y]=podXY(t);dots.push({p:[[360,410],[x+52,y+31]],c:'sm',fail:D.mode==='bug'&&Math.random()<.3,d:0,silent:1})}}}
+ let h='';const v=.5*D.speed*(reduce?5:1)*(D.paused?0:1),now=performance.now();
+ for(let i=dots.length-1;i>=0;i--){const o=dots[i];if(!o.seg){o.seg=[0];for(let j=1;j<o.p.length;j++)o.seg.push(o.seg[j-1]+Math.hypot(o.p[j][0]-o.p[j-1][0],o.p[j][1]-o.p[j-1][1]));o.len=o.seg[o.seg.length-1]}
+  o.d+=dt*v;if(o.d>=o.len){dots.splice(i,1);if(o.fail)flashes.push({x:o.p[o.p.length-1][0],y:o.p[o.p.length-1][1],t:now,m:o.silent});continue}
+  const[x,y]=at(o,o.d);h+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${o.c==='m'?5:4.5}" class="dk ${o.c}"/>`}
+ for(let i=flashes.length-1;i>=0;i--){const f=flashes[i],a=(now-f.t)/450;if(a>1){flashes.splice(i,1);continue}h+=`<circle cx="${f.x}" cy="${f.y}" r="${6+a*16}" class="flash" style="opacity:${1-a};${f.m?'stroke:var(--warn)':''}"/>`}
+ if(dots.length>260)dots.splice(0,dots.length-260);
+ dpk.innerHTML=h}
+
+/* ---------- rollout panels ---------- */
+function chart(el,series,max,ref){const s=el.querySelector('svg'),W=el.clientWidth,H=el.clientHeight;if(!W)return;const L=34,B=18,T=6,n=60,hs=D.hist.slice(-n);
+ const x=i=>L+(W-L-6)*i/(n-1),y=v=>T+(H-T-B)*(1-v/max);let g='';
+ for(let k=0;k<=4;k++){const v=max*k/4;g+=`<line x1="${L}" x2="${W-6}" y1="${y(v)}" y2="${y(v)}" class="ax" stroke-dasharray="${k?'2 4':''}"/><text x="${L-6}" y="${y(v)+3}" text-anchor="end" class="axt">${Math.round(v)}${max===100?'%':''}</text>`}
+ if(ref!=null)g+=`<line x1="${L}" x2="${W-6}" y1="${y(ref)}" y2="${y(ref)}" stroke="var(--mute)" stroke-dasharray="6 4"/>`;
+ series.forEach(([k,c])=>{if(hs.length>1)g+=`<polyline fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round" points="${hs.map((p,i)=>`${x(i+n-hs.length).toFixed(1)},${y(Math.min(max,p[k])).toFixed(1)}`).join(' ')}"/>`});
+ g+=`<text x="${W-6}" y="${H-4}" text-anchor="end" class="axt">last ${n} ticks</text>`;s.innerHTML=g}
+function renderD(){drawD();const m=STR[D.strategy];
+ const stepCls=i=>i<D.hl||D.state==='done'&&D.active==='v2'?'dn':i===D.hl&&D.state==='running'?'on':'';
+ setHTML($('#how'),`<h3>${m.name}<span class="tag">${m.kind}</span></h3><p style="margin-top:8px">${m.blurb}</p>${dl([['good_for',m.good],['watch_out',m.risk]])}
+  <h4>steps</h4><ol class="steps">${m.steps.map((t,i)=>`<li class="${stepCls(i)}">${t}</li>`).join('')}</ol>
+  <h4>${D.strategy}.yaml</h4><pre>${yaml(m.yaml.replace('{N}',D.N).replace('{S}',D.surge).replace('{U}',D.unav))}</pre>`);
+ $('#dPhase').textContent=D.phase;$('#rstat').textContent='$ kubectl rollout status deployment/web → '+D.rstat;
+ $('#dChrome').textContent=`deployment/web · namespace shop · strategy ${m.name} · tick ${D.t}`;
+ setHTML($('#dlog'),D.evs.slice(0,120).map(e=>`<div class="ll ev ${e.l}"><span class="c">t+${String(e.t).padStart(3,'0')}s</span><span class="w">${e.text}</span></div>`).join(''));
+ chart($('#ch1'),[['r1','var(--blue)'],['r2','var(--grn)']],Math.max(10,D.N+2),D.N);
+ chart($('#ch2'),[['share','var(--grn)'],['v2err','var(--warn)'],['err','var(--err)']],100);
+ document.querySelectorAll('[data-st]').forEach(b=>{b.classList.toggle('on',b.dataset.st===D.strategy);b.setAttribute('aria-pressed',b.dataset.st===D.strategy)});
+ const busy=D.state==='running'||D.state==='undo';
+ $('#dGo').disabled=busy;$('#dGo').textContent=D.state==='idle'?'▶ Deploy v2':'▶ Reset and deploy again';$('#dUndo').disabled=D.state==='idle'||D.state==='undo';$('#dPause').textContent=D.paused?'Resume':'Pause';
+ ['#dN','#dS','#dU'].forEach(s=>$(s).disabled=busy);$('#dS').disabled=$('#dU').disabled=busy||D.strategy!=='rolling';
+ $('#dNo').textContent=D.N;$('#dSo').textContent=D.surge;$('#dUo').textContent=D.unav;$('#dSpo').textContent=D.speed+'×'}
+function kpisD(){const l=D.hist[D.hist.length-1]||{err:0,share:0};return [['b',`${ready('v1').length}/${alive('v1').length}`,'v1 ready / desired'],['g',`${ready('v2').length}/${alive('v2').length}`,'v2 ready / desired'],['g',Math.round(l.share)+'%','user traffic on v2'],[l.err>1?'r':'',l.err.toFixed(1)+'%','user requests failing'],['p',D.state,'rollout state']]}
+$('#strat').innerHTML=SKEYS.map((k,i)=>`<button data-st="${k}"><kbd>${i+1}</kbd>${STR[k].name}</button>`).join('');
+const pickStrat=k=>{if(D.state==='running'||D.state==='undo')return;D.strategy=k;dReset()};
+$('#strat').addEventListener('click',e=>{const b=e.target.closest('[data-st]');if(b)pickStrat(b.dataset.st)});
+$('#dN').oninput=e=>{D.N=+e.target.value;dReset()};
+$('#dS').oninput=e=>{D.surge=+e.target.value;if(!D.surge&&!D.unav){D.unav=1;$('#dU').value=1}renderD()};
+$('#dU').oninput=e=>{D.unav=+e.target.value;if(!D.surge&&!D.unav){D.surge=1;$('#dS').value=1}renderD()};
+$('#dM').onchange=e=>{D.mode=e.target.value};
+$('#dSp').oninput=e=>{D.speed=+e.target.value;renderD()};
+const deploy=()=>{if(D.state==='running'||D.state==='undo')return;if(D.state!=='idle')dReset();D.state='running';D.paused=false;D.s=0;D.k=0;D.hl=0;dlog(`Normal  ${STR[D.strategy].kind}  kubectl apply: image registry/web:v1 → v2 (${STR[D.strategy].name})`);phase('Deploy started…');renderD()};
+$('#dGo').onclick=deploy;$('#dPause').onclick=()=>{D.paused=!D.paused;renderD()};$('#dStep').onclick=()=>{const p=D.paused;D.paused=false;tick();D.paused=p||true;renderD()};
+$('#dUndo').onclick=undo;$('#dReset').onclick=()=>{dReset()};
+const ro=new ResizeObserver(()=>{if(VIEW==='rollouts')renderD()});ro.observe($('#ch1'));
+
+/* =====================================================================
+   SHELL: views, header, status, keys, loops
+   ===================================================================== */
+const HEAD={traffic:{cmd:'<b>kubectl</b> <em>trace ingress -A --follow --show ifa,non-ifa</em>',ttl:'Follow a request through Kubernetes',sub:'Every dot is one request. Yellow-framed paths are internet-facing (IFA), purple-framed paths are internal only (non-IFA). Follow either from DNS through load balancer, node, ingress class and Service to a pod. Click any box to inspect it, and any log line to replay its trace.'},
+ rollouts:{cmd:'<b>kubectl</b> <em>argo rollouts get rollout web --watch</em>',ttl:'Ship v2 without breaking v1',sub:'Pick a deployment strategy and watch it work pod by pod: ReplicaSets scaling, pods moving through their lifecycle, the traffic split shifting, and what users see when v2 is broken. Change the v2 behaviour to see how each strategy protects you, or does not.'}};
+function setView(v){VIEW=v;document.querySelectorAll('.tabs a').forEach(a=>{a.classList.toggle('on',a.dataset.v===v);a.setAttribute('aria-current',a.dataset.v===v?'page':'false')});
+ $('#v-traffic').hidden=v!=='traffic';$('#v-rollouts').hidden=v!=='rollouts';const H=HEAD[v];$('#cmd').innerHTML=`❯ ${H.cmd} <span class="cur"></span>`;$('#ttl').innerHTML=`<span class="cm"># </span>${H.ttl}`;$('#sub').textContent=H.sub;
+ if(v==='rollouts')renderD();else{draw();renderInsp()}renderKpis();renderStatus()}
+const fromHash=()=>setView(location.hash==='#rollouts'?'rollouts':'traffic');
+addEventListener('hashchange',fromHash);
+function renderKpis(){setHTML($('#kpis'),(VIEW==='traffic'?kpisTraffic():kpisD()).map(([c,b,s])=>`<div class="kpi ${c}"><b>${b}</b><span>${s}</span></div>`).join(''))}
+function renderStatus(){const x=VIEW==='traffic'
+ ?`<span class="mode${S.live?'':' stop'}">${S.live?'LIVE':'PAUSED'}</span><span>ctx prod-us-east</span><span>ns shop</span><span>policy ${S.policy}</span><span>canary ${S.canary}%</span><span>rl ${S.rl?'5/s':'off'}</span><span>${S.rate} req/s · ${flying.length} in flight</span><span class="r">t r  views · ? help</span>`
+ :`<span class="mode${D.paused?' stop':''}">${D.paused?'PAUSED':D.state.toUpperCase()}</span><span>deployment/web</span><span>${STR[D.strategy].name}</span><span>replicas ${D.N}</span><span>v2: ${$('#dM').selectedOptions[0].text}</span><span>tick ${D.t}</span><span class="r">t r  views · ? help</span>`;setHTML($('#status'),x)}
+const help=$('#help');$('#hclose').onclick=()=>help.classList.remove('on');
+document.addEventListener('keydown',e=>{if(e.target.matches('input,select,textarea')){if(e.key==='Escape')e.target.blur();return}if(e.metaKey||e.ctrlKey||e.altKey)return;const k=e.key;
+ if(k==='?'){help.classList.toggle('on');return}if(k==='Escape'){help.classList.remove('on');return}
+ if(k==='t'){location.hash='traffic';return}if(k==='r'){location.hash='rollouts';return}
+ const onBtn=e.target.closest('button,a,[data-k]');
+ if(VIEW==='traffic'){
+  if(/^[1-8]$/.test(k))tries[+k-1][1]();else if(k===' '&&!onBtn){e.preventDefault();S.live=!S.live;sync()}
+  else if(k==='s')$('#go').click();else if(k==='b')$('#burst').click();
+  else if(k==='p')document.querySelector(`[data-pol="${S.policy==='Cluster'?'Local':'Cluster'}"]`).click();
+  else if(k==='+'||k==='='){S.rate=Math.min(8,S.rate+1);sync()}else if(k==='-'){S.rate=Math.max(1,S.rate-1);sync()}
+  else if(k==='/'){e.preventDefault();$('#flt').focus()}}
+ else{if(/^[1-6]$/.test(k))pickStrat(SKEYS[+k-1]);else if(k==='d')deploy();else if(k===' '&&!onBtn){e.preventDefault();$('#dPause').click()}
+  else if(k==='n')$('#dStep').click();else if(k==='u')undo();else if(k==='x')dReset()}});
+
+/* ---------- start ---------- */
+const t0=Date.now();for(let i=0;i<20;i++){const r=i%4===3?route(clients[3+(i%2)],'GET','ops.corp.internal','/'):route(clients[i%3],'GET','shop.example.com',paths[i%paths.length]);r.end=t0-(20-i)*450;ridMap[r.rid]=r;done.push(r);logs.unshift({req:r})}
+S.selReq=done[done.length-1];
+dReset();
+setInterval(()=>{if(S.live&&Math.random()<S.rate*0.1)randomReq()},100);
+setInterval(()=>{if(VIEW==='traffic'){draw();renderInsp();if(dirty){renderLog();dirty=false}}renderKpis()},400);
+setInterval(renderStatus,250);
+let lastT=performance.now();
+function frame(t){const dt=Math.min(60,t-lastT);lastT=t;
+ if(VIEW==='traffic')frameTraffic(dt);else{frameD(dt);tickT+=dt*D.speed;if(tickT>800){tickT=0;tick()}}
+ requestAnimationFrame(frame)}
+sync();renderTrace();renderLog();fromHash();requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
