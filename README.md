@@ -10,13 +10,14 @@ No build step and no dependencies: open `index.html` in a browser. The only exte
 
 Live request dots travel from the client through DNS, the load balancer, the node, the ingress controller and the Service to a pod. Click any box to inspect it, or any log line to replay its full hop-by-hop trace, including the headers the pod receives.
 
-- **IFA vs non-IFA traffic**
-  - Internet-facing: public DNS → CDN/WAF → external L4 load balancer → `nginx-external` ingress class.
-  - Internal only: corporate DNS → private load balancer → `nginx-internal` ingress class.
+- **IFA vs non-IFA traffic, one app.** The same cluster, the same `shop` namespace and the same Deployments are reachable on two entry IPs:
+  - **IFA IP** `34.120.8.10`: `shop.example.com` → public DNS → CDN/WAF → IFA load balancer → `nginx-ifa` ingress controller.
+  - **non-IFA IP** `10.0.0.50`: `shop.corp.internal` → corporate DNS → private load balancer → `nginx-nonifa` ingress controller.
+  - Each controller has its own LoadBalancer Service and Ingress object (`shop-ifa`, `shop-nonifa`). Both route to the same Services and pods. Each pod's label counts how many IFA and non-IFA requests it served.
 - **externalTrafficPolicy `Cluster` vs `Local`**: SNAT, extra hops, load balancer health checks, and where the client IP is lost or kept (`X-Forwarded-For`, `X-Real-IP`).
 - **Ingress routing**: host and path rules, TLS termination, default backend 404s, `limit-rps`, canary weight.
 - **Services and EndpointSlices**: readiness, crashed pods still listed as endpoints (502), no endpoints (503).
-- **Failure scenarios**: pod crash, node failure, WAF blocking a SQL injection, an internet client asking for an internal-only name (NXDOMAIN), rate limiting.
+- **Failure scenarios**: pod crash, node failure, WAF blocking a SQL injection, an internet client trying the non-IFA name (NXDOMAIN), rate limiting.
 
 ### `rollouts.yaml`: deployment strategies, pod by pod
 
@@ -38,7 +39,7 @@ You can make v2 **healthy**, **buggy (5xx on 30% of requests)**, or **failing it
 | Key | Action |
 |---|---|
 | `t` / `r` | Switch to traffic.flow / rollouts.yaml |
-| `1`–`8` | Run a traffic scenario (traffic.flow) |
+| `1`–`9` | Run a traffic scenario (traffic.flow) |
 | `1`–`6` | Pick a strategy (rollouts.yaml) |
 | `space` | Toggle live traffic / pause the rollout |
 | `s`, `b`, `p` | Send and trace, burst ×15, flip externalTrafficPolicy |
