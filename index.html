@@ -72,7 +72,9 @@ kbd{font:12px var(--mono);color:var(--warn);margin-right:6px}
 .wire{stroke:#2b364d;stroke-width:1.2;fill:none}.wire.ifa{stroke:#ffcc6670}.wire.int{stroke:#c3a6ff70}.wire.off{stroke-dasharray:3 6;opacity:.4}.wire.dns{stroke-dasharray:2 5}
 .t{font:500 13px var(--mono);fill:var(--ink)}.s{font:11px var(--mono);fill:var(--mute)}.s.bad{fill:var(--err)}
 .lt{font:500 14px var(--mono);fill:var(--ok)}.ct{font:500 12px var(--mono);fill:var(--pur)}
-.ghost rect{fill:none;stroke-dasharray:5 5}.can rect{fill:var(--can);stroke:#6b5420}.waf rect{stroke:#6b5420}.int rect{stroke:#4b3f73}.vip rect{stroke-width:2.2}.waf.vip rect{stroke:var(--warn)}.int.vip rect{stroke:var(--pur)}
+.ghost rect{fill:none;stroke-dasharray:5 5}.can rect{fill:var(--can);stroke:#6b5420}.n.clu rect{fill:#0f131c;stroke:#2b364d;stroke-width:1.4}.n.clu.failing rect{fill:#2a1216;stroke:var(--err)}.n.clu.down rect{fill:url(#hatch)}.n.clu.sel rect,.n.ns.sel rect{stroke:var(--cob);stroke-width:2.4}
+.cn{font:500 17px var(--mono);fill:var(--ok)}.n.ns rect{fill:#c3a6ff0d;stroke:var(--pur);stroke-width:1.8}.nsl{font:500 15px var(--mono);fill:var(--pur)}.nd.failing rect{stroke:var(--err)}.nd.down{opacity:.45}
+.waf rect{stroke:#6b5420}.int rect{stroke:#4b3f73}.vip rect{stroke-width:2.2}.waf.vip rect{stroke:var(--warn)}.int.vip rect{stroke:var(--pur)}
 .pod.crashing rect{stroke:var(--err);stroke-width:2.2}.pod.notready rect{stroke-dasharray:4 4}.pod.unknown{opacity:.35}
 .np{fill:var(--cob)}
 .pk.fly{fill:var(--cob)}.pk.ok{fill:var(--ok)}.pk.e4{fill:var(--warn)}.pk.e5{fill:var(--err)}.pk.me{stroke:#fff;stroke-width:2}
@@ -168,14 +170,14 @@ html{scroll-padding-top:72px}
     <label class="chk"><input type="checkbox" id="rl"> limit-rps: 5 per IP</label>
   </div>
   <div class="try" id="try"><span>$ run scenario</span></div>
-  <p class="note" id="note">Same cluster, same namespace (shop), same Deployments. IFA traffic (yellow) enters on the IFA IP 34.120.8.10 through public DNS and the WAF. Non-IFA traffic (purple) enters on the non-IFA IP 10.0.0.50 through corporate DNS. Each IP has its own ingress controller, and both meet at the same Services and pods. Press 2 to see it.</p>
+  <p class="note" id="note">Each big box is a cluster. The purple box inside it is namespace shop, the only namespace, holding the ingress controllers, Services and pods. Nodes are the machines in the strip underneath. Press 1 to see one namespace across clusters, and 2 to see the same app on two IPs.</p>
 </section>
 <section class="mapwrap">
-  <div class="win"><div class="chrome"><i></i><i></i><i></i><span>cluster.map · prod-us-east · 3 nodes · 2 ingress classes · click any box</span></div><div class="scroll"><svg id="map" class="map" viewBox="0 0 1160 770" role="img" aria-label="Kubernetes cluster topology with live requests">
+  <div class="win"><div class="chrome"><i></i><i></i><i></i><span>clusters.map · 2 clusters · 1 namespace (shop) · IFA + non-IFA IP per cluster · click any box</span></div><div class="scroll"><svg id="map" class="map" viewBox="0 0 1300 960" role="img" aria-label="Two Kubernetes clusters, one namespace, with live requests">
     <defs><pattern id="hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="10" height="10" fill="#121722"/><line x1="0" y1="0" x2="0" y2="10" stroke="#ff6e6e" stroke-opacity=".35" stroke-width="3"/></pattern></defs>
     <g id="st"></g><g id="pk"></g>
   </svg></div></div>
-  <p class="small"><span><i class="dot" style="background:var(--cob)"></i>IFA request in flight</span><span><i class="dot" style="background:var(--pur)"></i>Non-IFA request in flight</span><span><i class="dot" style="background:var(--ok)"></i>2xx</span><span><i class="dot" style="background:var(--warn)"></i>4xx / blocked</span><span><i class="dot" style="background:var(--err)"></i>5xx or timeout</span><span>Simulated cluster: names, IPs and timings are illustrative.</span></p>
+  <p class="small"><span><i class="dot" style="background:var(--cob)"></i>IFA request in flight</span><span><i class="dot" style="background:var(--pur)"></i>Non-IFA request in flight</span><span><i class="dot" style="background:var(--ok)"></i>2xx</span><span><i class="dot" style="background:var(--warn)"></i>4xx / blocked</span><span><i class="dot" style="background:var(--err)"></i>5xx or timeout</span><span>Simulated clusters: names, IPs and timings are illustrative.</span></p>
 </section>
 <section class="band grid">
   <div class="card"><h2>curl.sh</h2><div>
@@ -249,156 +251,171 @@ const ts=t=>{const d=new Date(t);return d.toTimeString().slice(0,8)+'.'+String(d
 const yaml=t=>t.split('\n').map(l=>{const m=l.match(/^(\s*-?\s*)([\w./-]+)(:)(.*)$/);if(m&&!l.trim().startsWith('#'))return `${m[1]}<span class="k">${m[2]}</span>:${m[4]?'<span class="v">'+m[4]+'</span>':''}`;return l.trim().startsWith('#')?`<span class="y-c">${l}</span>`:l}).join('\n');
 
 /* =====================================================================
-   TRAFFIC VIEW
+   TRAFFIC VIEW: multi-cluster, one namespace (shop), IFA + non-IFA IPs per cluster
    ===================================================================== */
-const S={live:true,rate:3,speed:1,policy:'Cluster',canary:0,rl:false,sel:{k:'ing',id:'ingress-ifa-a'},selReq:null,flt:''};
+const S={live:true,rate:3,speed:1,policy:'Cluster',canary:0,rl:false,sel:{k:'ns',id:'east'},selReq:null,flt:''};
 const clients=[
- {id:'c1',name:'Browser',where:'Newark, NJ',ip:'203.0.113.24',y:100,zone:'ifa'},
- {id:'c2',name:'Mobile app',where:'London, UK',ip:'198.51.100.7',y:200,zone:'ifa'},
- {id:'c3',name:'Partner API',where:'Frankfurt, DE',ip:'192.0.2.55',y:300,zone:'ifa'},
- {id:'c4',name:'Teller desktop',where:'Branch LAN',ip:'10.20.4.15',y:540,zone:'int'},
- {id:'c5',name:'Batch job',where:'On-prem DC',ip:'10.30.8.2',y:660,zone:'int'}];
-const nodes=[{id:'node-a',ip:'10.0.1.11',top:30},{id:'node-b',ip:'10.0.1.12',top:280},{id:'node-c',ip:'10.0.1.13',top:530}];
-nodes.forEach(n=>n.state='ready');
-const ROW=[85,175];
-const ings=[{id:'ingress-ifa-a',node:'node-a',cls:'ext',ip:'10.244.1.5'},{id:'ingress-ifa-b',node:'node-b',cls:'ext',ip:'10.244.2.5'},
- {id:'ingress-nonifa-b',node:'node-b',cls:'int',ip:'10.244.2.6'},{id:'ingress-nonifa-c',node:'node-c',cls:'int',ip:'10.244.3.5'}];
-const svcs=[{id:'web-svc',ip:'10.96.12.40',y:115,sel:'app=web, track=stable',rr:0},{id:'web-canary-svc',ip:'10.96.12.41',y:285,sel:'app=web, track=canary',rr:0},
- {id:'api-svc',ip:'10.96.30.8',y:455,sel:'app=api',rr:0}];
-const pods=[
- {id:'web-7f9c-a1',svc:'web-svc',node:'node-a',col:0,row:0,ip:'10.244.1.7'},{id:'api-5d8b-x2',svc:'api-svc',node:'node-a',col:1,row:0,ip:'10.244.1.9'},{id:'web-7f9c-r2',svc:'web-svc',node:'node-a',col:0,row:1,ip:'10.244.1.12'},
- {id:'web-7f9c-b4',svc:'web-svc',node:'node-b',col:0,row:0,ip:'10.244.2.8'},{id:'web-canary-c9',svc:'web-canary-svc',node:'node-b',col:1,row:0,ip:'10.244.2.11'},{id:'api-5d8b-p3',svc:'api-svc',node:'node-b',col:0,row:1,ip:'10.244.2.14'},
- {id:'api-5d8b-k7',svc:'api-svc',node:'node-c',col:0,row:0,ip:'10.244.3.6'},{id:'web-7f9c-m3',svc:'web-svc',node:'node-c',col:1,row:0,ip:'10.244.3.9'},{id:'api-5d8b-q1',svc:'api-svc',node:'node-c',col:0,row:1,ip:'10.244.3.11'}];
-pods.forEach(p=>{p.state='ready';p.restarts=0});
-const N=id=>nodes.find(n=>n.id===id),SV=id=>svcs.find(s=>s.id===id),PD=id=>pods.find(p=>p.id===id);
-const PX=p=>p.col?1000:840, PY=p=>N(p.node).top+ROW[p.row];
-const hasIng=(n,cls)=>ings.some(i=>i.node===n.id&&i.cls===cls);
-const flying=[],done=[],logs=[],ridMap={},rlHits={},lbRR={ext:0,int:0};
+ {id:'c1',name:'Browser',where:'Newark, NJ',ip:'203.0.113.24',y:110,zone:'ifa'},
+ {id:'c2',name:'Mobile app',where:'London, UK',ip:'198.51.100.7',y:215,zone:'ifa'},
+ {id:'c3',name:'Partner API',where:'Frankfurt, DE',ip:'192.0.2.55',y:320,zone:'ifa'},
+ {id:'c4',name:'Teller desktop',where:'Branch LAN',ip:'10.20.4.15',y:600,zone:'int'},
+ {id:'c5',name:'Batch job',where:'On-prem DC',ip:'10.30.8.2',y:800,zone:'int'}];
+const CL=[{id:'east',name:'cluster-east',region:'us-east-1',T:20,ifa:'34.120.8.10',non:'10.0.0.50',net:'10.0.1',pn:'44'},
+          {id:'west',name:'cluster-west',region:'us-east-2',T:500,ifa:'34.120.9.20',non:'10.8.0.50',net:'10.8.1',pn:'48'}];
+const nodes=[],ings=[],svcs=[],pods=[];
+CL.forEach((c,ci)=>{c.state='ready';
+ ['a','b','c'].forEach((x,i)=>nodes.push({cl:c.id,id:'node-'+x,ip:`${c.net}.${11+i}`,state:'ready'}));
+ [['ingress-ifa-1','ext','node-a',95],['ingress-ifa-2','ext','node-b',150],['ingress-nonifa-1','int','node-b',250],['ingress-nonifa-2','int','node-c',305]]
+  .forEach(([id,cls,node,dy],i)=>ings.push({cl:c.id,id,cls,node,dy,ip:`10.${c.pn}.${i+1}.5`}));
+ [['web-svc',95,'app=web, track=stable'],['web-canary-svc',190,'app=web, track=canary'],['api-svc',300,'app=api']]
+  .forEach(([id,dy,sel],i)=>svcs.push({cl:c.id,id,dy,sel,ip:`10.96.${ci?60:12}.${40+i}`,rr:0}));
+ const sx=ci?['q7z','m2c','h8d','t4n','w9e','b5r','k3p']:['a1x','b4k','m3v','c9d','x2f','p3g','k7s'];
+ [['web-7f9c','web-svc','node-a',0,95],['web-7f9c','web-svc','node-b',1,95],['web-7f9c','web-svc','node-c',2,95],['canary','web-canary-svc','node-b',0,190],
+  ['api-5d8b','api-svc','node-a',0,300],['api-5d8b','api-svc','node-b',1,300],['api-5d8b','api-svc','node-c',2,300]]
+  .forEach(([pre,svc,node,col,dy],i)=>pods.push({cl:c.id,id:`${pre}-${sx[i]}`,svc,node,col,dy,ip:`10.${c.pn}.${col+1}.${20+i}`,state:'ready',restarts:0}))});
+const K=(c,i)=>c+'|'+i;
+const CLu=id=>CL.find(c=>c.id===id),N=(c,id)=>nodes.find(n=>n.cl===c&&n.id===id),SV=(c,id)=>svcs.find(s=>s.cl===c&&s.id===id);
+const PD=k=>{const[c,id]=k.split('|');return pods.find(p=>p.cl===c&&p.id===id)};
+const PX=p=>905+p.col*124,PY=p=>CLu(p.cl).T+p.dy;
+const hasIng=(n,kind)=>ings.some(i=>i.cl===n.cl&&i.node===n.id&&i.cls===kind);
+const flying=[],done=[],logs=[],ridMap={},rlHits={},rr={ext:0,int:0,lb:{}};
 const rid=()=>Math.random().toString(16).slice(2,10);
 const cls=r=>!r.end?'fly':(r.status==='ERR'||r.status>=500)?'e5':(r.status==='NXDOMAIN'||r.status>=400)?'e4':'ok';
 const stLabel=r=>!r.end?'in flight':r.status==='ERR'?'timeout':r.status;
-const lbOff=(n,c)=>n.state==='down'||(S.policy==='Local'&&!hasIng(n,c));
-const inEp=p=>(p.state==='ready'||p.state==='crashing')&&N(p.node).state==='ready';
+const podUp=p=>N(p.cl,p.node).state==='ready'&&CLu(p.cl).state==='ready';
+const inEp=p=>(p.state==='ready'||p.state==='crashing')&&podUp(p);
 const recent=id=>done.filter(r=>Date.now()-r.end<10000&&r.touch.includes(id));
 const errs=rs=>rs.filter(r=>cls(r)!=='ok').length;
 const pct=(rs,q)=>{if(!rs.length)return 0;const a=rs.map(r=>r.ms).sort((x,y)=>x-y);return a[Math.min(a.length-1,Math.floor(q*a.length))]};
+const clState=c=>c.state==='ready'?'Healthy':c.state==='failing'?'Not responding':'Down, out of rotation';
 
 function route(c,method,host,path,opts={}){
  const r={rid:rid(),c,method,host,path,t0:Date.now(),hops:[],pts:[[170,c.y]],touch:[c.id],status:null,ms:0};
  const hop=(k,id,title,text,ms,bad)=>{r.hops.push({k,id,title,text,ms,bad});r.ms+=ms;if(id&&!r.touch.includes(id))r.touch.push(id)};
  const end=s=>{r.status=s;return r};
  const pub=!host.endsWith('.internal');r.zone=pub?'ifa':'int';
+ const live=CL.filter(x=>x.state!=='down');
+ const pick=kind=>opts.cl&&live.includes(CLu(opts.cl))?CLu(opts.cl):live[rr[kind]++%live.length];
  if(!pub){
-  if(c.zone==='ifa'){r.pts.push([205,63]);hop('DNS','pdns','NXDOMAIN',`${host} is the non-IFA name of the app and is published only in corporate DNS. The non-IFA IP 10.0.0.50 is private, so from the internet that entry point does not exist. Internet users reach the same app through the IFA name shop.example.com.`,30,'bad');return end('NXDOMAIN')}
-  hop('DNS','idns',`${host} → 10.0.0.50`,'The corporate resolver answers from the private zone corp.internal with the non-IFA IP 10.0.0.50. It is the same app as shop.example.com, published under an internal name on a private IP that only routes inside the company network or over VPN.',0.3);
-  r.pts.push([272,623]);
-  return inCluster(r,c,'int',c.ip,c.ip,hop,end,opts);
+  if(c.zone==='ifa'){r.pts.push([205,63]);hop('DNS','pdns','NXDOMAIN',`${host} is the non-IFA name of the app and is published only in corporate DNS. Every cluster's non-IFA IP is private, so from the internet that entry point does not exist. Internet users reach the same app through the IFA name shop.example.com.`,30,'bad');return end('NXDOMAIN')}
+  if(!live.length){hop('DNS','gslb','SERVFAIL: no healthy cluster','Every cluster failed the GSLB health check.',1,'bad');return end('ERR')}
+  const cl=pick('int');
+  hop('DNS','gslb',`${host} → ${cl.non} (${cl.name})`,`The corporate GSLB is health-checked DNS. It knows the non-IFA IP of every cluster (${CL.map(x=>`${x.name} ${x.non}`).join(', ')}) and answers with one from a healthy cluster${live.length<CL.length?'. The failed cluster has been dropped from its answers':''}. TTL 30 s, so clients follow a failover within seconds.`,0.3);
+  r.pts.push([275,648]);
+  return inCluster(r,c,cl,'int',c.ip,c.ip,hop,end,opts);
  }
  const egress=c.zone==='int',l4=egress?'192.0.2.200':c.ip;
- hop('DNS','pdns',`${host} → CDN edge (anycast)`,`Public DNS points the name at the nearest CDN / WAF edge, so the cluster's own load balancer address is never exposed. ${egress?'This client is inside the company, so it leaves through the corporate egress proxy (NAT 192.0.2.200) and comes back in from the internet like any customer.':''}`,0.2);
- r.pts.push([272,158]);
- if(/'|<script/i.test(path)){hop('WAF','waf','403 blocked by WAF rule 942100','The managed SQL-injection rule matched the query string. The edge drops the request, so it never reaches the load balancer or the cluster.',2,'bad');return end(403)}
- hop('WAF','waf','TLS terminated · WAF rules passed',`The edge decrypts HTTPS with the public certificate, checks the request against WAF rules (SQL injection, XSS, bot score, geo), then opens a new TLS connection to the IFA IP 34.120.8.10. It appends X-Forwarded-For: ${l4}. From here on, the TCP source is the edge address 130.211.1.9, not the client.`,4);
- r.pts.push([272,273]);
- return inCluster(r,c,'ext','130.211.1.9',l4,hop,end,opts);
+ hop('DNS','pdns',`${host} → CDN edge (anycast)`,`Public DNS points the IFA name at the nearest CDN / WAF edge, so no cluster IP is exposed directly.${egress?' This client is inside the company, so it leaves through the corporate egress proxy (NAT 192.0.2.200) and comes back in from the internet like any customer.':''}`,0.2);
+ r.pts.push([275,178]);
+ if(/'|<script/i.test(path)){hop('WAF','waf','403 blocked by WAF rule 942100','The managed SQL-injection rule matched the query string. The edge drops the request, so it never reaches any cluster.',2,'bad');return end(403)}
+ if(!live.length){hop('WAF','waf','503: no healthy origin','Every cluster failed the origin health check.',2,'bad');return end(503)}
+ const cl=pick('ext');
+ hop('WAF','waf',`WAF passed · origin → ${cl.name}`,`The edge decrypts HTTPS and checks the request against WAF rules (SQL injection, XSS, bot score, geo). Its origin pool holds the IFA IP of every cluster (${CL.map(x=>`${x.name} ${x.ifa}`).join(', ')}) and health-checks them. It picked ${cl.name}, opened a new TLS connection to ${cl.ifa} and appended X-Forwarded-For: ${l4}. From here on, the TCP source is the edge address 130.211.1.9.`,4);
+ return inCluster(r,c,cl,'ext','130.211.1.9',l4,hop,end,opts);
 }
-function inCluster(r,c,cl,l4src,realClient,hop,end,opts){
- const ext=cl==='ext',lbId=ext?'elb':'ilb',lbIp=ext?'34.120.8.10':'10.0.0.50',np=ext?30443:31443,word=ext?'IFA':'non-IFA';r.vip=lbIp;
+function inCluster(r,c,cl,kind,l4src,realClient,hop,end,opts){
+ const ext=kind==='ext',vip=ext?cl.ifa:cl.non,np=ext?30443:31443,word=ext?'IFA':'non-IFA',T=cl.T,vy=T+(ext?122:278),vk=K(cl.id,ext?'ifa':'non');
  const {host,path,method}=r,now=Date.now();
- const targets=nodes.filter(n=>!lbOff(n,cl));
- if(!targets.length){hop('Load balancer',lbId,'No healthy targets','Every node is failing the health check, so the connection is dropped.',1,'bad');return end('ERR')}
- const n=opts.node&&targets.includes(N(opts.node))?N(opts.node):targets[lbRR[cl]++%targets.length];
- r.via=n.id;
- hop('Load balancer',lbId,`TCP ${lbIp}:443 → ${n.id}:${np}`,(ext?'This is the IFA IP: a public L4 load balancer that only accepts connections from the CDN / WAF edge. It forwards TCP and never reads HTTP. ':'This is the non-IFA IP: a private L4 load balancer, reachable only from the corporate network. It forwards TCP and never reads HTTP. ')+(S.policy==='Local'?`Under externalTrafficPolicy: Local only nodes running an ${word} ingress pod pass the health check on :10256/healthz.`:`Under externalTrafficPolicy: Cluster every Ready node passes the health check, even one with no ${word} ingress pod.`),0.4);
- r.pts.push([380,n.top+ROW[ext?0:1]]);r.touch.push(n.id);
- if(n.state==='failing'){hop('Node',n.id,'Connection timed out',`${n.id} has stopped responding. The load balancer keeps sending traffic until three health checks in a row fail, so clients that land here in that window time out.`,1000,'bad');return end('ERR')}
- let ingNode;const avail=nodes.filter(x=>hasIng(x,cl)&&x.state==='ready');
- if(S.policy==='Local')ingNode=n;else{if(!avail.length){hop('Node',n.id,`No ${word} ingress pods`,`No ${word} ingress controller pod is running anywhere.`,0.5,'bad');return end('ERR')}ingNode=avail[Math.random()*avail.length|0]}
- const remote=S.policy==='Cluster'?n.ip:l4src,hopN=ingNode!==n;
- if(S.policy==='Cluster')hop('Node',n.id,hopN?`kube-proxy forwards to ${ingNode.id}`:`kube-proxy picks the local ${word} ingress pod`,`${hasIng(n,cl)?'':`This node runs no ${word} ingress pod. `}With externalTrafficPolicy: Cluster, kube-proxy can choose any ${word} ingress pod in the cluster${hopN?`, and it chose one on ${ingNode.id}, which adds a hop`:''}. It also SNATs the packet, so nginx sees the source as the node IP ${n.ip} instead of ${l4src}.`,hopN?0.5:0.1,'warn');
- else hop('Node',n.id,`NodePort ${np} → local ${word} ingress pod`,`externalTrafficPolicy: Local keeps the packet on this node and skips SNAT, so nginx sees the real TCP source ${l4src}.`,0.1);
- const iy=ingNode.top+ROW[ext?0:1];r.pts.push([418,iy],[578,iy]);
- const ing=ings.find(i=>i.node===ingNode.id&&i.cls===cl);r.ing=ing.id;r.touch.push(ing.id,ingNode.id);
+ r.cl=cl.id;r.vip=vip;r.pts.push([405,vy],[545,vy]);r.touch.push(K(cl.id,'cluster'),K(cl.id,'ns'));
+ if(cl.state==='failing'){hop(word+' IP',vk,'Connection timed out',`${cl.name} has gone dark, but the ${ext?'WAF origin pool':'GSLB'} needs three failed health checks before it stops sending traffic here. Requests in that window time out, then everything moves to the other cluster.`,1000,'bad');return end('ERR')}
+ const cn=nodes.filter(n=>n.cl===cl.id&&n.state!=='down'&&(S.policy==='Cluster'||hasIng(n,kind)));
+ if(!cn.length){hop(word+' IP',vk,'No healthy nodes','Every node behind this IP failed its health check.',1,'bad');return end('ERR')}
+ const lk=cl.id+kind;rr.lb[lk]=(rr.lb[lk]||0)+1;
+ const n=(opts.node&&cn.find(x=>x.id===opts.node))||cn[rr.lb[lk]%cn.length];
+ hop(word+' IP',vk,`TCP ${vip}:443 → ${n.id}:${np}`,`${ext?`The IFA IP of ${cl.name}: a public L4 load balancer that only accepts connections from the WAF edge.`:`The non-IFA IP of ${cl.name}: a private L4 load balancer that only the corporate network can reach.`} It forwards TCP to NodePort ${np} on a node and never reads HTTP. ${S.policy==='Local'?`Under externalTrafficPolicy: Local only nodes running a ${word} ingress pod pass its health check.`:`Under externalTrafficPolicy: Cluster every Ready node passes, even one without a ${word} ingress pod.`}`,0.4);
+ const nk=K(cl.id,n.id);r.touch.push(nk);r.via=n.id;
+ if(n.state==='failing'){hop('Node',nk,'Connection timed out',`${n.id} in ${cl.name} stopped responding. The load balancer keeps sending to it until three health checks fail.`,1000,'bad');return end('ERR')}
+ const avail=ings.filter(i=>i.cl===cl.id&&i.cls===kind&&N(cl.id,i.node).state==='ready');
+ const ing=S.policy==='Local'?avail.find(i=>i.node===n.id):avail[Math.random()*avail.length|0];
+ if(!ing){hop('Node',nk,`No ${word} ingress pod available`,`No ${word} ingress pod is running in ${cl.name}.`,0.5,'bad');return end('ERR')}
+ const remote=S.policy==='Cluster'?n.ip:l4src,hopN=ing.node!==n.id;
+ if(S.policy==='Cluster')hop('Node',nk,hopN?`kube-proxy forwards to ${ing.id} on ${ing.node}`:`kube-proxy picks ${ing.id} on this node`,`${hasIng(n,kind)?'':`${n.id} runs no ${word} ingress pod. `}With externalTrafficPolicy: Cluster, kube-proxy can pick any ${word} ingress pod in ${cl.name}${hopN?', and this one is on another node, which adds a hop':''}. It also SNATs the packet, so nginx sees the source as the node IP ${n.ip} instead of ${l4src}.`,hopN?0.5:0.1,'warn');
+ else hop('Node',nk,`NodePort ${np} → ${ing.id} on this node`,`externalTrafficPolicy: Local keeps the packet on ${n.id} and skips SNAT, so nginx sees the real TCP source ${l4src}.`,0.1);
+ const iy=T+ing.dy,ik=K(cl.id,ing.id);r.pts.push([575,iy],[715,iy]);r.ing=ing.id;r.touch.push(ik);
  const real=ext?realClient:remote;r.src=real;r.remote=remote;
- hop('Ingress',ing.id,ext?`TLS re-terminated · ${method} ${host}${path}`:`TLS terminated · ${method} ${host}${path}`,ext
-  ?`ingressClassName: nginx-ifa. The TCP source (remote_addr) is ${remote}. use-forwarded-headers is on and the edge and node ranges are in proxy-real-ip-cidr, so nginx trusts X-Forwarded-For and recovers the real client ${real}.`
-  :`ingressClassName: nginx-nonifa, with a certificate from the internal CA. There is no WAF or CDN in front, so there is no trusted X-Forwarded-For. nginx can only use the TCP source, which is ${remote}${remote!==c.ip?`: the node IP, not the client ${c.ip}`:', the real client'}.`,1.1);
+ hop('Ingress',ik,`TLS terminated · ${method} ${host}${path}`,`${ing.id} is an ingress-nginx pod running inside namespace shop (class nginx-${ext?'ifa':'nonifa'}, --watch-namespace=shop). ${ext?`The TCP source is ${remote}, but the WAF and node ranges are trusted (use-forwarded-headers, proxy-real-ip-cidr), so nginx recovers the real client ${real} from X-Forwarded-For.`:`There is no WAF in front, so nothing in X-Forwarded-For is trusted. nginx only has the TCP source ${remote}${remote!==c.ip?`: the node IP, not the client ${c.ip}`:', the real client'}.`}`,1.1);
  if(S.rl){const a=(rlHits[real]=(rlHits[real]||[]).filter(t=>now-t<1000));a.push(now);
-  if(a.length>5){hop('Ingress',ing.id,'429 Too Many Requests',`limit-rps allows 5 requests per second per client IP, and ${real} has sent ${a.length} in the last second.${real!==c.ip&&!ext?` Because of SNAT, this counter is shared by every internal client that entered through ${n.id}.`:''}`,0.1,'bad');return end(429)}}
- let svc,why;const okHost=ext?'shop.example.com':'shop.corp.internal',iname=ext?'shop-ifa':'shop-nonifa';
- if(host!==okHost){hop('Ingress',ing.id,'404 from the default backend',`No Ingress of class nginx-${ext?'ifa':'nonifa'} has a rule for host ${host}, so nginx answers the request itself and it never reaches a Service.`,0.2,'bad');return end(404)}
- const api=path.startsWith('/api');svc=SV(api?'api-svc':'web-svc');why=`The ${iname} Ingress rule ${host} ${api?'/api':'/'} (Prefix) points to ${svc.id}:80`;
- if(!api&&S.canary>0&&Math.random()*100<S.canary){svc=SV('web-canary-svc');why+=`, and the canary Ingress for this class (canary-weight: ${S.canary}) sent this request to web-canary-svc instead`}
- const eps=pods.filter(p=>p.svc===svc.id&&inEp(p));r.touch.push(svc.id);r.svc=svc.id;
- if(!eps.length){r.pts.push([625,svc.y]);hop('Service',svc.id,'503 Service Unavailable',`${why}, but ${svc.id} has no ready endpoints, so nginx returns 503.`,0.3,'bad');return end(503)}
- const p=eps[svc.rr++%eps.length],pn=N(p.node),cross=pn!==ingNode;
- r.pts.push([625,svc.y],[795,svc.y],[PX(p),PY(p)]);r.touch.push(p.id,pn.id);r.pod=p.id;
- hop('Service',svc.id,`${svc.id} → ${p.ip}:8080`,`${why}. ingress-nginx reads the Service's EndpointSlice and connects straight to a pod IP, skipping the ClusterIP ${svc.ip}. It chose ${p.id} out of ${eps.length} ready endpoint${eps.length>1?'s':''}. ${cross?`That pod runs on ${pn.id}, so the packet crosses the pod network (CNI overlay) between nodes.`:'That pod is on the same node, so there is no extra hop.'} From here on, ${ext?'IFA':'non-IFA'} traffic is indistinguishable from ${ext?'non-IFA':'IFA'} traffic: same namespace, same Service, same Deployment, same pods.`,cross?0.6:0.05);
+  if(a.length>5){hop('Ingress',ik,'429 Too Many Requests',`limit-rps allows 5 requests per second per client IP, and ${real} has sent ${a.length} in the last second.${real!==c.ip&&!ext?` Because of SNAT, this counter is shared by every internal client that entered through ${n.id}.`:''} Each ingress pod counts on its own, so the real limit is per pod, per cluster.`,0.1,'bad');return end(429)}}
+ const okHost=ext?'shop.example.com':'shop.corp.internal',iname=ext?'shop-ifa':'shop-nonifa';
+ if(host!==okHost){hop('Ingress',ik,'404 from the default backend',`No Ingress of class nginx-${ext?'ifa':'nonifa'} in namespace shop has a rule for host ${host}, so nginx answers itself and the request never reaches a Service.`,0.2,'bad');return end(404)}
+ const api=path.startsWith('/api');let svc=SV(cl.id,api?'api-svc':'web-svc'),why=`The ${iname} Ingress rule ${host} ${api?'/api':'/'} (Prefix) points to ${svc.id}:80`;
+ if(!api&&S.canary>0&&Math.random()*100<S.canary){svc=SV(cl.id,'web-canary-svc');why+=`, and the web-canary Ingress (canary-weight: ${S.canary}) sent this request to web-canary-svc instead`}
+ const sk=K(cl.id,svc.id),eps=pods.filter(p=>p.cl===cl.id&&p.svc===svc.id&&inEp(p));r.touch.push(sk);r.svc=svc.id;
+ if(!eps.length){r.pts.push([740,T+svc.dy]);hop('Service',sk,'503 Service Unavailable',`${why}, but ${svc.id} has no ready endpoints in ${cl.name}, so nginx returns 503. Endpoints never cross clusters.`,0.3,'bad');return end(503)}
+ const p=eps[svc.rr++%eps.length],cross=p.node!==ing.node,pk=K(cl.id,p.id);
+ r.pts.push([740,T+svc.dy],[880,T+svc.dy],[PX(p),PY(p)]);r.touch.push(pk,K(cl.id,p.node));r.pod=p.id;
+ hop('Service',sk,`${svc.id} → ${p.ip}:8080`,`${why}. ingress-nginx reads the EndpointSlice of ${svc.id} in namespace shop and connects straight to a pod IP (${eps.length} ready in ${cl.name}). A Service only knows the pods of its own cluster. ${cross?`${p.id} runs on ${p.node}, so the packet crosses the pod network to another node.`:`${p.id} runs on the same node as the ingress pod.`} From here, IFA and non-IFA traffic look exactly the same.`,cross?0.6:0.05);
  r.hdr=`Host: ${host}\nX-Request-ID: ${r.rid}\nX-Real-IP: ${real}\nX-Forwarded-For: ${ext?real+', '+remote:remote}\nX-Forwarded-Proto: https\nX-Forwarded-Host: ${host}`;
- if(p.state==='crashing'){hop('Pod',p.id,'502 Bad Gateway','The container has crashed, but its readiness probe has not failed three times yet, so the pod is still an endpoint. nginx gets "connection refused" and returns 502.',0.4,'bad');return end(502)}
- const can=svc.id==='web-canary-svc',b=svc.id==='api-svc'?[25,90]:can?[70,190]:[12,45],app=b[0]+Math.random()*(b[1]-b[0]);
+ if(p.state==='crashing'){hop('Pod',pk,'502 Bad Gateway','The container has crashed, but its readiness probe has not failed three times yet, so the pod is still an endpoint. nginx gets "connection refused" and returns 502.',0.4,'bad');return end(502)}
+ const can=svc.id==='web-canary-svc',b=api?[25,90]:can?[70,190]:[12,45],app=b[0]+Math.random()*(b[1]-b[0]);
  const st=can&&Math.random()<.06?500:method==='POST'?201:200;
- hop('Pod',p.id,`${st} from ${p.id}`,st===500?'The v2 canary build threw an exception. Check the canary error rate before raising the weight (see rollouts.yaml).':`The app handled ${method} ${path} in ${app.toFixed(0)} ms${can?'. Canary build v2 is noticeably slower':''}.`,app,st===500?'bad':0);
+ hop('Pod',pk,`${st} from ${p.id}`,st===500?'The v2 canary build threw an exception. Check the canary error rate before raising the weight (see rollouts.yaml).':`namespace shop · ${cl.name} · ${p.node}. The app handled ${method} ${path} in ${app.toFixed(0)} ms${can?'. Canary build v2 is noticeably slower':''}.`,app,st===500?'bad':0);
  return end(st);
 }
 function geo(r){r.seg=[0];for(let i=1;i<r.pts.length;i++){const[a,b]=r.pts[i-1],[c,d]=r.pts[i];r.seg.push(r.seg[i-1]+Math.hypot(c-a,d-b))}r.len=r.seg[r.seg.length-1];r.d=0;r.back=false}
 function at(r,d){const P=r.pts||r.p;for(let i=1;i<r.seg.length;i++){if(d<=r.seg[i]){const f=(d-r.seg[i-1])/((r.seg[i]-r.seg[i-1])||1),[a,b]=P[i-1],[c,e]=P[i];return[a+(c-a)*f,b+(e-b)*f]}}return P[P.length-1]}
 let dirty=true;
-function send(c,method,host,path,opts={}){const r=route(c,method,host,path,opts);geo(r);ridMap[r.rid]=r;if(flying.length<90&&VIEW==='traffic')flying.push(r);else finish(r);if(opts.select){S.selReq=r;renderTrace()}return r}
-function finish(r){r.end=Date.now();done.push(r);if(done.length>700)done.shift();logs.unshift({req:r});if(logs.length>400)logs.pop();dirty=true;if(r===S.selReq)renderTrace()}
+function send(c,method,host,path,opts={}){const r=route(c,method,host,path,opts);geo(r);ridMap[r.rid]=r;if(flying.length<100&&VIEW==='traffic')flying.push(r);else finish(r);if(opts.select){S.selReq=r;renderTrace()}return r}
+function finish(r){r.end=Date.now();done.push(r);if(done.length>800)done.shift();logs.unshift({req:r});if(logs.length>400)logs.pop();dirty=true;if(r===S.selReq)renderTrace()}
 function ev(text,lvl=''){logs.unshift({ev:1,t:Date.now(),text,lvl});dirty=true}
 const paths=['/','/','/products','/products/42','/api/orders','/api/cart'];
-function randomReq(){if(Math.random()<.3){const c=clients[3+(Math.random()<.6?0:1)];return send(c,'GET','shop.corp.internal',paths[Math.random()*paths.length|0])}
- const c=clients[Math.random()*3|0],p=paths[Math.random()*paths.length|0];return send(c,p==='/api/orders'&&Math.random()<.3?'POST':'GET',Math.random()<.04?'admin.example.com':'shop.example.com',p)}
+function randomReq(){const p=paths[Math.random()*paths.length|0];if(Math.random()<.35){const c=clients[3+(Math.random()<.6?0:1)];return send(c,'GET','shop.corp.internal',p)}
+ const c=clients[Math.random()*3|0];return send(c,p==='/api/orders'&&Math.random()<.3?'POST':'GET',Math.random()<.04?'admin.example.com':'shop.example.com',p)}
 
-function killPod(id){const p=PD(id);if(p.state!=='ready')return;p.state='crashing';ev(`Warning  BackOff  pod/${id}: container exited with code 137 (still listed as an endpoint)`,'warn');
- setTimeout(()=>{p.state='notready';ev(`Warning  Unhealthy  pod/${id}: readiness probe failed 3 times, removed from the EndpointSlice`,'warn');draw()},3000);
- setTimeout(()=>{p.state='ready';p.restarts++;ev(`Normal  Ready  pod/${id}: restart #${p.restarts}, readiness passed, added back to endpoints`,'good');draw()},10000);draw()}
-function failNode(id){const n=N(id);if(n.state!=='ready')return;n.state='failing';ev(`Warning  NodeNotReady  ${id}: kubelet stopped posting status. LB health checks failing`,'warn');
- setTimeout(()=>{if(n.state!=='failing')return;n.state='down';ev(`Normal  LB  ${id} removed from both load balancers after 3 failed checks`);draw()},2500);draw()}
-function recoverNode(id){N(id).state='ready';ev(`Normal  NodeReady  ${id}: kubelet is posting status. Back in LB rotation`,'good');draw()}
+function killPod(k){const p=PD(k);if(!p||p.state!=='ready')return;p.state='crashing';ev(`Warning  BackOff  ${p.cl}/shop/pod/${p.id}: container exited with code 137 (still listed as an endpoint)`,'warn');
+ setTimeout(()=>{p.state='notready';ev(`Warning  Unhealthy  ${p.cl}/shop/pod/${p.id}: readiness probe failed 3 times, removed from the EndpointSlice`,'warn');draw()},3000);
+ setTimeout(()=>{p.state='ready';p.restarts++;ev(`Normal  Ready  ${p.cl}/shop/pod/${p.id}: restart #${p.restarts}, back in endpoints`,'good');draw()},10000);draw()}
+function failNode(k){const[c,id]=k.split('|'),n=N(c,id);if(n.state!=='ready')return;n.state='failing';ev(`Warning  NodeNotReady  ${c}/${id}: kubelet stopped posting status`,'warn');
+ setTimeout(()=>{if(n.state!=='failing')return;n.state='down';ev(`Normal  LB  ${c}/${id} removed from the IFA and non-IFA load balancers`);draw()},2500);draw()}
+function recoverNode(k){const[c,id]=k.split('|');N(c,id).state='ready';ev(`Normal  NodeReady  ${c}/${id}: back in rotation`,'good');draw()}
+function failCluster(id){const c=CLu(id);if(c.state!=='ready')return;c.state='failing';ev(`Warning  ClusterDown  ${c.name}: API and both entry IPs stopped answering`,'warn');
+ setTimeout(()=>{if(c.state!=='failing')return;c.state='down';ev(`Normal  Failover  ${c.name} removed from the WAF origin pool and the GSLB. All traffic now goes to the other cluster`);draw()},3000);draw()}
+function recoverCluster(id){const c=CLu(id);c.state='ready';ev(`Normal  Failback  ${c.name} healthy again, back in the WAF origin pool and the GSLB`,'good');draw()}
 
 /* ---------- map ---------- */
 const st=$('#st'),pk=$('#pk');
-function box(k,id,x,y,w,h,lines,extra=''){const sel=S.sel&&S.sel.k===k&&S.sel.id===id?' sel':'';
- return `<g class="n ${extra}${sel}" data-k="${k}" data-id="${id}" tabindex="0" role="button" aria-label="${lines[0]}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7"/>${lines.map((l,i)=>`<text x="${x+11}" y="${y+20+i*16}" class="${i?'s':'t'}${typeof l==='object'?' bad':''}">${typeof l==='object'?l.b:l}</text>`).join('')}</g>`}
+const isSel=(k,id)=>S.sel&&S.sel.k===k&&S.sel.id===id?' sel':'';
+function box(k,id,x,y,w,h,lines,extra=''){
+ return `<g class="n ${extra}${isSel(k,id)}" data-k="${k}" data-id="${id}" tabindex="0" role="button" aria-label="${typeof lines[0]==='object'?lines[0].b:lines[0]}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7"/>${lines.map((l,i)=>`<text x="${x+11}" y="${y+20+i*16}" class="${i?'s':'t'}${typeof l==='object'?' bad':''}">${typeof l==='object'?l.b:l}</text>`).join('')}</g>`}
 const line=(a,b,c='')=>`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" class="wire ${c}"/>`;
 function draw(){let h='';
- h+=`<rect x="8" y="28" width="344" height="380" rx="10" class="zone ifa"/><text x="16" y="20" class="zl ifa">Internet · IFA traffic → IFA IP</text>`;
- h+=`<rect x="8" y="430" width="344" height="320" rx="10" class="zone int"/><text x="16" y="424" class="zl int">Corporate · non-IFA traffic → non-IFA IP</text>`;
- nodes.forEach(n=>{const sel=S.sel&&S.sel.k==='node'&&S.sel.id===n.id?' sel':'';const lab=n.state==='ready'?'Ready':n.state==='failing'?'Not responding':'NotReady';
-  h+=`<g class="n lane ${n.state}${sel}" data-k="node" data-id="${n.id}" tabindex="0" role="button" aria-label="${n.id}"><rect x="380" y="${n.top}" width="770" height="230" rx="12"/><text x="398" y="${n.top+24}" class="lt">${n.id}</text><text x="462" y="${n.top+24}" class="s${n.state!=='ready'?' bad':''}">${n.ip} · ${lab}</text></g>`});
- h+=`<rect x="612" y="30" width="196" height="730" rx="12" class="svcband"/><text x="710" y="20" text-anchor="middle" class="ct">namespace shop · Services</text>`;
- h+=`<g><text x="710" y="560" text-anchor="middle" class="ct">Both IPs converge here</text>${['IFA IP 34.120.8.10','non-IFA IP 10.0.0.50','→ same Services','→ same Deployments','→ same pods'].map((t,i)=>`<text x="710" y="${584+i*20}" text-anchor="middle" class="s" style="${i===0?'fill:var(--warn)':i===1?'fill:var(--pur)':''}">${t}</text>`).join('')}</g>`;
- clients.forEach(c=>{if(c.zone==='ifa'){h+=line([170,c.y],[205,158],'ifa')+line([170,c.y],[205,63],'dns')}else{h+=line([170,c.y],[205,623],'int')+line([170,c.y],[205,468],'dns')}});
- h+=line([272,196],[272,235],'ifa');
- nodes.forEach(n=>{h+=line([340,273],[380,n.top+ROW[0]],lbOff(n,'ext')?'ifa off':'ifa')+line([340,623],[380,n.top+ROW[1]],lbOff(n,'int')?'int off':'int')});
- ings.forEach(i=>{const n=N(i.node),y=n.top+ROW[i.cls==='ext'?0:1];const wc=i.cls==='ext'?'ifa':'int';h+=line([380,y],[418,y],wc);['web-svc','web-canary-svc','api-svc'].forEach(s=>h+=line([578,y],[625,SV(s).y],wc))});
- pods.forEach(p=>{h+=line([795,SV(p.svc).y],[PX(p),PY(p)],inEp(p)?'':'off')});
- h+=box('pdns','pdns',205,40,135,46,['Public DNS','shop.example.com'],'waf');
- h+=box('waf','waf',205,120,135,76,['CDN / WAF','edge 130.211.0.0/22','TLS · OWASP rules'],'waf');
- h+=box('elb','elb',205,235,135,76,['IFA IP','34.120.8.10:443','external LB · L4'],'waf vip');
- h+=box('idns','idns',205,445,135,46,['Corporate DNS','shop.corp.internal'],'int');
- h+=box('ilb','ilb',205,585,135,76,['non-IFA IP','10.0.0.50:443','internal LB · L4'],'int vip');
+ h+=`<rect x="8" y="28" width="352" height="412" rx="10" class="zone ifa"/><text x="16" y="20" class="zl ifa">Internet · IFA traffic → IFA IPs</text>`;
+ h+=`<rect x="8" y="480" width="352" height="460" rx="10" class="zone int"/><text x="16" y="472" class="zl int">Corporate · non-IFA traffic → non-IFA IPs</text>`;
+ CL.forEach(cl=>{const T=cl.T,dn=cl.state!=='ready';
+  h+=`<g class="n clu ${cl.state}${isSel('cluster',cl.id)}" data-k="cluster" data-id="${cl.id}" tabindex="0" role="button" aria-label="${cl.name}"><rect x="392" y="${T}" width="900" height="440" rx="14"/><text x="410" y="${T+30}" class="cn">${cl.name}</text><text x="548" y="${T+30}" class="s${dn?' bad':''}">${cl.region} · ${clState(cl)}</text></g>`;
+  h+=`<g class="n ns${isSel('ns',cl.id)}" data-k="ns" data-id="${cl.id}" tabindex="0" role="button" aria-label="namespace shop in ${cl.name}"><rect x="560" y="${T+56}" width="720" height="300" rx="10"/><text x="575" y="${T+50}" class="nsl">namespace: shop</text><text x="1266" y="${T+50}" text-anchor="end" class="s">the app's only namespace · same in every cluster</text></g>`;
+  h+=line([345,178],[405,T+122],'ifa'+(cl.state==='down'?' off':''))+line([345,648],[405,T+278],'int'+(cl.state==='down'?' off':''));
+  ings.filter(i=>i.cl===cl.id).forEach(i=>{const y=T+i.dy,wc=i.cls==='ext'?'ifa':'int';h+=line([545,T+(i.cls==='ext'?122:278)],[575,y],wc);
+   svcs.filter(s=>s.cl===cl.id).forEach(s=>h+=line([715,y],[740,T+s.dy],wc))});
+  pods.filter(p=>p.cl===cl.id).forEach(p=>{h+=line([880,T+SV(cl.id,p.svc).dy],[PX(p),PY(p)],inEp(p)?'':'off')});
+  h+=box('vip',K(cl.id,'ifa'),405,T+87,140,70,['IFA IP',cl.ifa+':443',dn?{b:'unreachable'}:'public L4 LB'],'waf vip');
+  h+=box('vip',K(cl.id,'non'),405,T+243,140,70,['non-IFA IP',cl.non+':443',dn?{b:'unreachable'}:'private L4 LB'],'int vip');
+  ings.filter(i=>i.cl===cl.id).forEach(i=>{const k=K(cl.id,i.id),up=N(cl.id,i.node).state==='ready'&&!dn;
+   h+=box('ing',k,575,T+i.dy-22,140,44,[i.id,up?`${i.node} · ${recent(k).length}/10s`:{b:'Unknown'}],i.cls==='ext'?'waf':'int')});
+  svcs.filter(s=>s.cl===cl.id).forEach(s=>{const e=pods.filter(p=>p.cl===cl.id&&p.svc===s.id&&inEp(p)).length;
+   h+=box('svc',K(cl.id,s.id),740,T+s.dy-24,140,48,[s.id,e?`${e} ready endpoint${e>1?'s':''}`:{b:'0 endpoints'}],s.id.includes('canary')?'can':'')});
+  h+=`<text x="742" y="${T+250}" class="s">Service → its pods</text><text x="742" y="${T+266}" class="s">in this cluster only</text>`;
+  pods.filter(p=>p.cl===cl.id).forEach(p=>{const k=K(cl.id,p.id),rz=recent(k),zi=rz.filter(r=>r.zone==='ifa').length;
+   const st3=!podUp(p)?{b:'Unknown'}:p.state==='ready'?`IFA ${zi} · non ${rz.length-zi}`:p.state==='crashing'?{b:'Crashed'}:{b:'Restarting'};
+   h+=box('pod',k,PX(p),PY(p)-28,112,56,[p.id,p.node,st3],`pod ${!podUp(p)?'unknown':p.state}${p.svc.includes('canary')?' can':''}`)});
+  h+=`<text x="410" y="${T+396}" class="s">nodes</text><text x="410" y="${T+412}" class="s">(machines)</text>`;
+  nodes.filter(n=>n.cl===cl.id).forEach((n,i)=>{h+=box('node',K(cl.id,n.id),575+i*170,T+372,160,46,[n.id,`${n.ip} · ${dn?'Unknown':n.state==='ready'?'Ready':n.state==='failing'?'Not responding':'NotReady'}`],'nd '+n.state)});
+  h+=`<text x="1090" y="${T+392}" class="s">one namespace spans</text><text x="1090" y="${T+408}" class="s">every node; pods are</text><text x="1090" y="${T+424}" class="s">spread across them</text>`});
+ clients.forEach(c=>{if(c.zone==='ifa')h+=line([170,c.y],[205,178],'ifa')+line([170,c.y],[205,63],'dns');else h+=line([170,c.y],[205,648],'int')});
+ const pool=x=>x.state==='down'?{b:`${x.id} down`}:`${x.id} ${x===CL[0]?x.ifa:x.ifa}`;
+ h+=box('pdns','pdns',205,40,140,46,['Public DNS','shop.example.com'],'waf');
+ h+=box('waf','waf',205,130,140,96,['CDN / WAF','origin pool:',...CL.map(x=>x.state==='down'?{b:`${x.id} · down`}:`${x.id} ${x.ifa}`)],'waf');
+ h+=box('gslb','gslb',205,600,140,96,['Corporate GSLB','shop.corp.internal',...CL.map(x=>x.state==='down'?{b:`${x.id} · down`}:`${x.id} ${x.non}`)],'int');
  clients.forEach(c=>{h+=box('client',c.id,20,c.y-32,150,64,[c.name,c.ip,c.where],c.zone==='int'?'int':'')});
- nodes.forEach(n=>{['ext','int'].forEach((cl,ri)=>{const y=n.top+ROW[ri];
-  h+=`<circle cx="380" cy="${y}" r="5" class="np"/><text x="390" y="${y+40}" class="s" style="fill:var(--${cl==='ext'?'warn':'pur'})">${cl==='ext'?'IFA NodePort :30443':'non-IFA NodePort :31443'}</text>`;
-  const g=ings.find(i=>i.node===n.id&&i.cls===cl);
-  if(g)h+=box('ing',g.id,418,y-25,160,50,[g.id,n.state==='ready'?`${g.ip} · ${recent(g.id).length}/10s`:{b:'Unreachable'}],cl==='int'?'int':'waf');
-  else h+=box('node',n.id,418,y-25,160,50,[`No ${cl==='ext'?'IFA':'non-IFA'} ingress`,S.policy==='Local'?'LB health check 503':'kube-proxy forwards'],'ghost')})});
- svcs.forEach(s=>{const e=pods.filter(p=>p.svc===s.id&&inEp(p)).length;h+=box('svc',s.id,625,s.y-25,170,50,[s.id,e?`${e} ready endpoint${e>1?'s':''}`:{b:'0 endpoints'}],s.id.includes('canary')?'can':'')});
- pods.forEach(p=>{const n=N(p.node),cnt=recent(p.id).length;
-  const rz=recent(p.id),zi=rz.filter(r=>r.zone==='ifa').length;const sub=n.state!=='ready'?{b:'Unknown (node down)'}:p.state==='ready'?`IFA ${zi} · non-IFA ${rz.length-zi}`:p.state==='crashing'?{b:'Crashed (still EP)'}:{b:'Restarting'};
-  h+=box('pod',p.id,PX(p),PY(p)-25,140,50,[p.id,sub],`pod ${n.state!=='ready'?'unknown':p.state}${p.svc.includes('canary')?' can':''}`)});
  setHTML(st,h);
 }
 const onPick=e=>{const g=e.target.closest('[data-k]');if(!g)return;S.sel={k:g.dataset.k,id:g.dataset.id};draw();renderInsp()};
 $('#map').addEventListener('click',onPick);
 $('#map').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();onPick(e)}});
 
-function frameTraffic(dt){const v=0.42*S.speed*(reduce?6:1);let h='';
+function frameTraffic(dt){const v=0.5*S.speed*(reduce?6:1);let h='';
  if(S.selReq)h+=`<polyline points="${S.selReq.pts.join(' ')}" class="route"/>`;
- for(let i=flying.length-1;i>=0;i--){const r=flying[i];r.d+=dt*v*(r.back?1.7:1);
+ for(let i=flying.length-1;i>=0;i--){const r=flying[i];r.d+=dt*v*(r.back?1.8:1);
   if(!r.back&&r.d>=r.len){r.back=true;r.d=0}
   if(r.back&&r.d>=r.len){flying.splice(i,1);finish(r);continue}
   const[x,y]=at(r,r.back?r.len-r.d:r.d),me=r===S.selReq;
@@ -407,56 +424,61 @@ function frameTraffic(dt){const v=0.42*S.speed*(reduce?6:1);let h='';
  pk.innerHTML=h}
 
 /* ---------- panels ---------- */
-function kpisTraffic(){const rs=done.filter(r=>Date.now()-r.end<10000),ok=rs.filter(r=>cls(r)==='ok').length,ifa=rs.filter(r=>r.zone==='ifa').length;
- return [['b',(rs.length/10).toFixed(1),'requests / s'],['g',rs.length?Math.round(ok/rs.length*100)+'%':'–','success'],['',pct(rs,.95).toFixed(0)+' ms','p95 latency'],['p',`${ifa}:${rs.length-ifa}`,'IFA : non-IFA, 10 s'],['r',errs(rs),'4xx + 5xx, 10 s']]}
+function kpisTraffic(){const rs=done.filter(r=>Date.now()-r.end<10000),ok=rs.filter(r=>cls(r)==='ok').length,ifa=rs.filter(r=>r.zone==='ifa').length,e=rs.filter(r=>r.cl==='east').length,w=rs.filter(r=>r.cl==='west').length;
+ return [['b',(rs.length/10).toFixed(1),'requests / s'],['g',rs.length?Math.round(ok/rs.length*100)+'%':'–','success'],['',pct(rs,.95).toFixed(0)+' ms','p95 latency'],['y',`${ifa}:${rs.length-ifa}`,'IFA : non-IFA, 10 s'],['p',`${e}:${w}`,'east : west, 10 s']]}
 function renderTrace(){const r=S.selReq;if(!r){setHTML($('#trace'),'<p class="mute">Send a request, or click a line in the log, to see each hop it took.</p>');return}
  const c=cls(r);
- setHTML($('#trace'),`<div class="th"><span class="chip ${c}">${stLabel(r)}</span><span class="chip ${r.zone==='ifa'?'zi':'zn'}">${r.zone==='ifa'?'IFA':'non-IFA'}${r.vip?' · '+r.vip:''}</span>${r.method} ${r.host}${r.path}</div>
+ setHTML($('#trace'),`<div class="th"><span class="chip ${c}">${stLabel(r)}</span><span class="chip ${r.zone==='ifa'?'zi':'zn'}">${r.zone==='ifa'?'IFA':'non-IFA'}${r.vip?' · '+r.vip:''}</span>${r.cl?`<span class="chip fly">${CLu(r.cl).name} / shop</span>`:''}<br>${r.method} ${r.host}${r.path}</div>
  <p class="mute">From ${r.c.name} (${r.c.ip}, ${r.c.where}) · ${r.ms.toFixed(1)} ms simulated · request ID ${r.rid}</p>
  <ol class="hops">${r.hops.map((h,i)=>`<li class="${h.bad||''}"><span class="hk">${i+1} · ${h.k}</span><div><b>${h.title}</b><p>${h.text}</p></div><span class="ms">+${h.ms<10?h.ms.toFixed(1):h.ms.toFixed(0)} ms</span></li>`).join('')}</ol>
  ${r.hdr?`<h4>Headers the pod receives</h4><pre>${r.hdr.split('\n').map(l=>{const[a,...b]=l.split(': ');return `<span class="k">${a}</span>: <span class="v">${b.join(': ')}</span>`}).join('\n')}</pre>`:'<h4>This request never reached a pod</h4>'}`)}
 const dl=rows=>`<dl>${rows.map(([a,b])=>`<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>`;
-function lbInsp(cl){const ext=cl==='ext',w=ext?'IFA':'non-IFA';
- return `<h3>${w} IP · ${ext?'34.120.8.10':'10.0.0.50'}</h3><p class="mute">Service ingress-nginx-${ext?'ifa':'nonifa'} · type LoadBalancer · ${ext?'public address, source-restricted to the WAF edge':'private address, annotation load-balancer-type: internal'} · externalTrafficPolicy: ${S.policy}</p>
- <table><tr><th>TARGET</th><th>HEALTH</th></tr>${nodes.map(n=>`<tr><td>${n.id}:${ext?30443:31443}</td><td>${n.state==='down'?'Removed, node down':n.state==='failing'?'Checks failing, still receiving':S.policy==='Local'&&!hasIng(n,cl)?`503: no local ${w} ingress pod`:'Healthy'}</td></tr>`).join('')}</table>
- <p>Each entry IP belongs to its own ingress controller's LoadBalancer Service, but both controllers send traffic to the same app in namespace shop. The IP decides the path in, not the app you reach.</p>
- <p>${ext?'Only reachable through the CDN / WAF: a firewall rule allows 443 from the edge ranges alone, so nobody can bypass the WAF by hitting the LB directly.':'It has no public IP at all. Only the corporate network, VPN and peered data centres can route to it.'}</p>
- <p>${S.policy==='Local'?'Local: only nodes that run an ingress pod of this class get traffic, and the client address is preserved.':'Cluster: every node gets traffic and kube-proxy forwards it. Load spreads evenly, but traffic can take an extra hop and the source address is SNATed.'}</p>`}
-function renderInsp(){const s=S.sel,el=$('#insp');if(!s){setHTML(el,'<p class="mute">Click any box on the map.</p>');return}const id=s.id;let h='';
+const poolTable=f=>`<table><tr><th>CLUSTER</th><th>IP</th><th>HEALTH</th></tr>${CL.map(x=>`<tr><td>${x.name}</td><td>${f(x)}</td><td>${x.state==='ready'?'Healthy':x.state==='failing'?'Checks failing, still receiving':'Removed'}</td></tr>`).join('')}</table>`;
+function renderInsp(){const s=S.sel,el=$('#insp');if(!s){setHTML(el,'<p class="mute">Click any box on the map.</p>');return}const id=s.id,[cid,nm]=id.split('|'),cl=CLu(cid);let h='';
  if(s.k==='client'){const c=clients.find(x=>x.id===id),rs=recent(id),seen=[...new Set(rs.map(r=>r.src).filter(Boolean))];
-  h=`<h3>${c.name}</h3><p class="mute">${c.where} · ${c.zone==='ifa'?'public':'private'} IP ${c.ip} · ${c.zone==='ifa'?'IFA':'non-IFA'} client</p>${dl([['requests_10s',rs.length],['errors_10s',errs(rs)],['ingress_saw',seen.join(', ')||'–']])}
-  <p>${c.zone==='ifa'?'Internet clients can only resolve public names. Try sending it to shop.corp.internal: the non-IFA name does not resolve on the internet.':'Internal clients use the non-IFA name shop.corp.internal and IP 10.0.0.50, skip the WAF, and land on exactly the same pods as internet users. If they call the public name, they leave through the corporate egress proxy and come back in on the IFA IP.'}</p>
+  h=`<h3>${c.name}</h3><p class="mute">${c.where} · ${c.zone==='ifa'?'public':'private'} IP ${c.ip} · ${c.zone==='ifa'?'IFA':'non-IFA'} client</p>${dl([['requests_10s',rs.length],['errors_10s',errs(rs)],['east_west',`${rs.filter(r=>r.cl==='east').length} / ${rs.filter(r=>r.cl==='west').length}`],['ingress_saw',seen.join(', ')||'–']])}
+  <p>${c.zone==='ifa'?'Internet clients only know the IFA name, which leads to an IFA IP. Try sending it to shop.corp.internal: the non-IFA name does not resolve on the internet.':'Internal clients use the non-IFA name shop.corp.internal. The GSLB hands them the non-IFA IP of a healthy cluster, and they land on exactly the same pods as internet users, without the WAF.'}</p>
   <button class="btn" data-act="send" data-id="${id}">Send a request from here</button>`}
- else if(s.k==='pdns')h=`<h3>Public DNS</h3><p class="mute">shop.example.com CNAME shop.example.com.cdn-edge.net</p><p>Only the IFA name is published publicly. The answer is the CDN / WAF edge, which forwards to the IFA IP 34.120.8.10. The non-IFA name shop.corp.internal is not published here, which is why the internet gets NXDOMAIN for it.</p>`;
- else if(s.k==='idns')h=`<h3>Corporate DNS</h3><p class="mute">Private zone corp.internal · shop.corp.internal → 10.0.0.50 (non-IFA IP)</p><p>Internal resolvers answer for the non-IFA name and forward everything else to public DNS. Same app, second name, second IP.</p>`;
- else if(s.k==='waf'){const rs=recent('waf');h=`<h3>CDN / WAF edge</h3><p class="mute">IFA only · egress ranges 130.211.0.0/22</p>${dl([['requests_10s',rs.length],['blocked_10s',rs.filter(r=>r.status===403).length],['tls','public cert *.example.com'],['rules','OWASP CRS, bot score, rate, geo']])}<p>Everything internet-facing passes here first. It terminates TLS, filters attacks, caches static files and sends clean traffic to the IFA IP with the client IP in X-Forwarded-For. Non-IFA traffic never touches it.</p>`}
- else if(s.k==='elb'||s.k==='ilb')h=lbInsp(s.k==='elb'?'ext':'int');
- else if(s.k==='node'){const n=N(id),ps=pods.filter(p=>p.node===id),rs=recent(id);
-  h=`<h3>${id}</h3><p class="mute">${n.ip} · ${n.state==='ready'?'Ready':n.state==='failing'?'Not responding':'NotReady'}</p>${dl([['external_ingress',hasIng(n,'ext')?'yes':'none'],['internal_ingress',hasIng(n,'int')?'yes':'none'],['traffic_10s',rs.length]])}
-  <table><tr><th>POD</th><th>STATE</th></tr>${ps.map(p=>`<tr><td>${p.id}</td><td>${n.state!=='ready'?'Unknown':p.state}</td></tr>`).join('')}</table>
-  ${n.state==='ready'?`<button class="btn danger" data-act="fail" data-id="${id}">Simulate node failure</button>`:`<button class="btn" data-act="recover" data-id="${id}">Recover node</button>`}
-  <p class="mute" style="margin-top:10px">In a real cluster the Deployments would reschedule these pods onto healthy nodes after the eviction timeout.</p>`}
- else if(s.k==='ing'){const g=ings.find(i=>i.id===id),ext=g.cls==='ext',rs=recent(id),lg=logs.filter(l=>l.req&&l.req.ing===id).slice(0,4);
-  const y=ext?`apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: shop-ifa\n  namespace: shop\n  annotations:\n    nginx.ingress.kubernetes.io/ssl-redirect: "true"${S.rl?'\n    nginx.ingress.kubernetes.io/limit-rps: "5"':''}\nspec:\n  ingressClassName: nginx-ifa\n  tls:\n  - hosts: [shop.example.com]\n    secretName: shop-example-tls\n  rules:\n  - host: shop.example.com\n    http:\n      paths:\n      - path: /api\n        pathType: Prefix\n        backend: {service: {name: api-svc, port: {number: 80}}}\n      - path: /\n        pathType: Prefix\n        backend: {service: {name: web-svc, port: {number: 80}}}`
-   :`apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: shop-nonifa\n  namespace: shop\nspec:\n  ingressClassName: nginx-nonifa\n  tls:\n  - hosts: [shop.corp.internal]\n    secretName: shop-corp-internal-tls\n  rules:\n  - host: shop.corp.internal\n    http:\n      paths:\n      - path: /api\n        pathType: Prefix\n        backend: {service: {name: api-svc, port: {number: 80}}}\n      - path: /\n        pathType: Prefix\n        backend: {service: {name: web-svc, port: {number: 80}}}`;
-  h=`<h3>${id}</h3><p class="mute">Pod ${g.ip} on ${g.node} · class ${ext?'nginx-ifa (IFA)':'nginx-nonifa (non-IFA)'}</p>${dl([['requests_10s',rs.length],['errors_10s',errs(rs)],['p50_p95',`${pct(rs,.5).toFixed(0)} / ${pct(rs,.95).toFixed(0)} ms`],['real_ip',ext?'from X-Forwarded-For (trusted edge)':'TCP source only'],['entry_ip',ext?'34.120.8.10 (IFA)':'10.0.0.50 (non-IFA)'],['canary_weight',S.canary+'%']])}
-  <p>One ingress controller per entry IP. Each controller has its own LoadBalancer Service (IFA IP 34.120.8.10, non-IFA IP 10.0.0.50) and only reads Ingress objects of its own class. The app ships two Ingress objects, shop-ifa and shop-nonifa, with the same paths and the same backend Services, so both kinds of traffic reach the same Deployment in namespace shop.</p>
+ else if(s.k==='pdns')h=`<h3>Public DNS</h3><p class="mute">shop.example.com CNAME shop.example.com.cdn-edge.net</p><p>Only the IFA name is published publicly, and it points at the CDN / WAF edge. The WAF then picks a cluster's IFA IP. The non-IFA name shop.corp.internal is not published here, which is why the internet gets NXDOMAIN for it.</p>`;
+ else if(s.k==='waf'){const rs=recent('waf');h=`<h3>CDN / WAF edge</h3><p class="mute">IFA traffic only · egress ranges 130.211.0.0/22</p>${dl([['requests_10s',rs.length],['blocked_10s',rs.filter(r=>r.status===403).length],['rules','OWASP CRS, bot score, rate, geo']])}<h4>origin pool (IFA IPs)</h4>${poolTable(x=>x.ifa)}<p>The WAF is the global load balancer for IFA traffic. It health-checks each cluster's IFA IP and spreads requests across the healthy ones. Non-IFA traffic never touches it.</p>`}
+ else if(s.k==='gslb'){const rs=recent('gslb');h=`<h3>Corporate GSLB</h3><p class="mute">health-checked DNS for shop.corp.internal · TTL 30 s</p>${dl([['answers_10s',rs.length]])}<h4>answer pool (non-IFA IPs)</h4>${poolTable(x=>x.non)}<p>The GSLB is the global load balancer for non-IFA traffic. It answers each lookup with the non-IFA IP of a healthy cluster, so internal clients connect straight to a cluster.</p>`}
+ else if(s.k==='cluster'){const rs=recent(K(cid,'cluster'));h=`<h3>${cl.name}</h3><p class="mute">${cl.region} · ${clState(cl)}</p>${dl([['ifa_ip',cl.ifa],['non_ifa_ip',cl.non],['namespaces_for_app','shop (only one)'],['nodes',nodes.filter(n=>n.cl===cid).map(n=>n.id).join(', ')],['requests_10s',rs.length]])}
+  <p>Every cluster runs an identical copy of namespace shop, deployed from the same manifests. Each cluster has its own IFA IP and non-IFA IP, and the WAF and GSLB spread traffic between clusters.</p>
+  ${cl.state==='ready'?`<button class="btn danger" data-act="failc" data-id="${cid}">Simulate cluster outage</button>`:`<button class="btn" data-act="recoverc" data-id="${cid}">Recover cluster</button>`}`}
+ else if(s.k==='ns'){const ps=pods.filter(p=>p.cl===cid),rd=(svc)=>`${ps.filter(p=>p.svc===svc&&inEp(p)&&p.state==='ready').length}/${ps.filter(p=>p.svc===svc).length}`,ig=(k)=>{const a=ings.filter(i=>i.cl===cid&&i.cls===k);return `${a.filter(i=>N(cid,i.node).state==='ready'&&cl.state==='ready').length}/${a.length}`};
+  const out=[`NAME                              READY / TYPE     ADDRESS`,`deployment/ingress-nginx-ifa       ${ig('ext')}`,`deployment/ingress-nginx-nonifa    ${ig('int')}`,`deployment/web                     ${rd('web-svc')}`,`deployment/web-canary              ${rd('web-canary-svc')}`,`deployment/api                     ${rd('api-svc')}`,``,
+   `service/ingress-nginx-ifa          LoadBalancer     ${cl.ifa}`,`service/ingress-nginx-nonifa       LoadBalancer     ${cl.non}`,...svcs.filter(x=>x.cl===cid).map(x=>`service/${x.id.padEnd(26)} ClusterIP        ${x.ip}`),``,
+   `ingress/shop-ifa                   nginx-ifa        shop.example.com`,`ingress/shop-nonifa                nginx-nonifa     shop.corp.internal`,`ingress/web-canary                 canary ${String(S.canary).padStart(2)}%       both hosts`].join('\n');
+  h=`<h3>namespace: shop</h3><p class="mute">${cl.name} · the app's only namespace</p><p>There is exactly one namespace, shop, and every cluster has an identical copy of it. Everything for the app lives inside it: both ingress controllers, both Ingress objects, the Services and the Deployments with their pods. A namespace is a logical boundary, not a machine, so its pods are spread across all of the cluster's nodes.</p>
+  <h4>kubectl get deploy,svc,ingress -n shop --context ${cl.name}</h4><pre>${out}</pre>`}
+ else if(s.k==='vip'){const ext=nm==='ifa',w=ext?'IFA':'non-IFA',kind=ext?'ext':'int';h=`<h3>${w} IP · ${ext?cl.ifa:cl.non}</h3><p class="mute">${cl.name} · Service ingress-nginx-${ext?'ifa':'nonifa'} in namespace shop · type LoadBalancer · externalTrafficPolicy: ${S.policy}</p>
+  <table><tr><th>TARGET</th><th>HEALTH</th></tr>${nodes.filter(n=>n.cl===cid).map(n=>`<tr><td>${n.id}:${ext?30443:31443}</td><td>${cl.state!=='ready'||n.state==='down'?'Unreachable':n.state==='failing'?'Checks failing, still receiving':S.policy==='Local'&&!hasIng(n,kind)?`503: no local ${w} ingress pod`:'Healthy'}</td></tr>`).join('')}</table>
+  <p>Each cluster has two entry IPs for the same app. This one takes ${w} traffic only, ${ext?'from the WAF edge (a firewall rule allows 443 from the edge ranges alone)':'from the corporate network, VPN and peered data centres. It has no public address'}, and hands it to the ${w} ingress pods.</p>`}
+ else if(s.k==='node'){const n=N(cid,nm),ps=pods.filter(p=>p.cl===cid&&p.node===nm),ig=ings.filter(i=>i.cl===cid&&i.node===nm);
+  h=`<h3>${nm}</h3><p class="mute">${cl.name} · ${n.ip} · ${n.state==='ready'?'Ready':n.state==='failing'?'Not responding':'NotReady'}</p>
+  <table><tr><th>POD IN NAMESPACE shop</th><th>STATE</th></tr>${[...ig.map(i=>[i.id,'Running']),...ps.map(p=>[p.id,podUp(p)?p.state:'Unknown'])].map(([a,b])=>`<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>
+  <p>A node is a machine. Pods from the one namespace are scheduled across all nodes, so losing a node removes a few pods of each Deployment, not the namespace.</p>
+  ${n.state==='ready'?`<button class="btn danger" data-act="fail" data-id="${id}">Simulate node failure</button>`:`<button class="btn" data-act="recover" data-id="${id}">Recover node</button>`}`}
+ else if(s.k==='ing'){const g=ings.find(i=>i.cl===cid&&i.id===nm),ext=g.cls==='ext',rs=recent(id),lg=logs.filter(l=>l.req&&l.req.cl===cid&&l.req.ing===nm).slice(0,4);
+  const y=`apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: ${ext?'shop-ifa':'shop-nonifa'}\n  namespace: shop${S.rl?'\n  annotations:\n    nginx.ingress.kubernetes.io/limit-rps: "5"':''}\nspec:\n  ingressClassName: nginx-${ext?'ifa':'nonifa'}\n  tls:\n  - hosts: [${ext?'shop.example.com':'shop.corp.internal'}]\n  rules:\n  - host: ${ext?'shop.example.com':'shop.corp.internal'}\n    http:\n      paths:\n      - path: /api\n        pathType: Prefix\n        backend: {service: {name: api-svc, port: {number: 80}}}\n      - path: /\n        pathType: Prefix\n        backend: {service: {name: web-svc, port: {number: 80}}}`;
+  h=`<h3>${nm}</h3><p class="mute">${cl.name} · namespace shop · pod ${g.ip} on ${g.node} · class nginx-${ext?'ifa':'nonifa'}</p>${dl([['entry_ip',`${ext?cl.ifa+' (IFA)':cl.non+' (non-IFA)'}`],['requests_10s',rs.length],['errors_10s',errs(rs)],['p50_p95',`${pct(rs,.5).toFixed(0)} / ${pct(rs,.95).toFixed(0)} ms`],['real_ip',ext?'X-Forwarded-For (trusted WAF)':'TCP source only'],['canary_weight',S.canary+'%']])}
+  <p>Each cluster runs two ingress controllers inside namespace shop, one per entry IP. This one only reads Ingress objects of class nginx-${ext?'ifa':'nonifa'}. Both Ingress objects point at the same Services, so IFA and non-IFA traffic reach the same pods.</p>
   <h4>${ext?'shop-ifa':'shop-nonifa'}.ingress.yaml</h4><pre>${yaml(y)}</pre>
   <h4>tail -n 4</h4><pre>${lg.map(l=>`${l.req.src} "${l.req.method} ${l.req.path}" ${stLabel(l.req)} ${l.req.ms.toFixed(0)}ms`).join('\n')||'No traffic yet'}</pre>`}
- else if(s.k==='svc'){const v=SV(id);h=`<h3>${id}</h3><p class="mute">ClusterIP ${v.ip}:80 → targetPort 8080 · selector ${v.sel}</p>
-  <table><tr><th>ENDPOINT</th><th>NODE</th><th>READY</th></tr>${pods.filter(p=>p.svc===id).map(p=>`<tr><td>${p.ip}:8080<br><span class="mute">${p.id}</span></td><td>${p.node}</td><td>${inEp(p)?(p.state==='crashing'?'yes, but crashed':'yes'):'no'}</td></tr>`).join('')}</table>
-  <p>A Service is a stable name, a virtual IP and a list of endpoints. ingress-nginx skips the ClusterIP and balances across these pod IPs itself. Pods calling each other (east-west traffic) use the ClusterIP through CoreDNS: ${id}.shop.svc.cluster.local.</p>`}
- else if(s.k==='pod'){const p=PD(id),rs=recent(id);h=`<h3>${id}</h3><p class="mute">${p.ip} on ${p.node} · behind ${p.svc}</p>${dl([['state',N(p.node).state!=='ready'?'Unknown':p.state],['restarts',p.restarts],['served_10s',rs.length],['p50',pct(rs,.5).toFixed(0)+' ms'],['readinessProbe','GET /healthz every 1 s, failureThreshold 3']])}
-  <button class="btn danger" data-act="kill" data-id="${id}" ${p.state!=='ready'||N(p.node).state!=='ready'?'disabled':''}>Crash this pod</button>
-  <p class="mute" style="margin-top:10px">Requests that hit it in the 3 seconds before the probe fails get a 502. After that it leaves the endpoints and traffic routes around it.</p>`}
+ else if(s.k==='svc'){const v=SV(cid,nm);h=`<h3>${nm}</h3><p class="mute">${cl.name} · namespace shop · ClusterIP ${v.ip}:80 → 8080 · selector ${v.sel}</p>
+  <table><tr><th>ENDPOINT</th><th>NODE</th><th>READY</th></tr>${pods.filter(p=>p.cl===cid&&p.svc===nm).map(p=>`<tr><td>${p.ip}:8080<br><span class="mute">${p.id}</span></td><td>${p.node}</td><td>${inEp(p)?(p.state==='crashing'?'yes, but crashed':'yes'):'no'}</td></tr>`).join('')}</table>
+  <p>The same Service exists in every cluster, but each copy only lists the pods of its own cluster. Both ingress classes send to it, so IFA and non-IFA requests share these endpoints. Pods calling each other use ${nm}.shop.svc.cluster.local.</p>`}
+ else if(s.k==='pod'){const p=PD(id),rs=recent(id),zi=rs.filter(r=>r.zone==='ifa').length;h=`<h3>${p.id}</h3><p class="mute">${cl.name} · namespace shop · ${p.ip} on ${p.node} · behind ${p.svc}</p>${dl([['state',podUp(p)?p.state:'Unknown'],['restarts',p.restarts],['ifa_10s',zi],['non_ifa_10s',rs.length-zi],['p50',pct(rs,.5).toFixed(0)+' ms'],['readinessProbe','GET /healthz every 1 s, failureThreshold 3']])}
+  <p>This one pod serves both IFA and non-IFA traffic. It cannot tell which IP a request came in on, except from the Host header.</p>
+  <button class="btn danger" data-act="kill" data-id="${id}" ${p.state!=='ready'||!podUp(p)?'disabled':''}>Crash this pod</button>`}
  setHTML(el,h)}
 $('#insp').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act,id=b.dataset.id;
  if(a==='send'){const c=clients.find(c=>c.id===id);send(c,'GET',c.zone==='ifa'?'shop.example.com':'shop.corp.internal','/',{select:true})}
- if(a==='kill')killPod(id);if(a==='fail')failNode(id);if(a==='recover')recoverNode(id);renderInsp()});
+ if(a==='kill')killPod(id);if(a==='fail')failNode(id);if(a==='recover')recoverNode(id);if(a==='failc')failCluster(id);if(a==='recoverc')recoverCluster(id);renderInsp()});
 function renderLog(){const f=S.flt.toLowerCase();
- const rows=logs.filter(l=>!f||(l.ev?l.text:[l.req.src,l.req.c.ip,l.req.method,l.req.host+l.req.path,stLabel(l.req),l.req.via,l.req.svc,l.req.pod,l.req.ing,l.req.zone==='ifa'?'ifa waf':'non-ifa internal'].join(' ')).toLowerCase().includes(f)).slice(0,150);
+ const rows=logs.filter(l=>!f||(l.ev?l.text:[l.req.src,l.req.c.ip,l.req.method,l.req.host+l.req.path,stLabel(l.req),l.req.cl,l.req.via,l.req.svc,l.req.pod,l.req.ing,l.req.vip,l.req.zone==='ifa'?'ifa waf':'non-ifa'].join(' ')).toLowerCase().includes(f)).slice(0,150);
  setHTML($('#log'),rows.map(l=>{if(l.ev)return `<div class="ll ev ${l.lvl}"><span class="c">${ts(l.t)}</span><span class="w">${l.text}</span></div>`;const r=l.req;
-  return `<div class="ll ${cls(r)}${r===S.selReq?' on':''}" data-rid="${r.rid}"><span class="c">${ts(r.end)}</span><span class="z ${r.zone}">${r.zone==='ifa'?'IFA     34.120.8.10':'non-IFA 10.0.0.50  '}</span><span class="ip">${r.src||r.c.ip}</span><span>"${r.method} ${r.host}${r.path}"</span><span class="st">${stLabel(r)}</span><span class="ms2">${r.ms.toFixed(0)}ms</span><span class="c">${r.ing?r.ing+' → ':''}${r.pod?r.svc+'/'+r.pod:r.svc||(r.status===403?'blocked at WAF':r.status==='NXDOMAIN'?'no public DNS record':'–')}</span></div>`}).join('')||'<div class="ll ev">No matching lines</div>')}
+  return `<div class="ll ${cls(r)}${r===S.selReq?' on':''}" data-rid="${r.rid}"><span class="c">${ts(r.end)}</span><span class="z ${r.zone}">${r.zone==='ifa'?'IFA    ':'non-IFA'} ${(r.vip||'–').padEnd(11)}</span><span class="ip">${r.src||r.c.ip}</span><span>"${r.method} ${r.host}${r.path}"</span><span class="st">${stLabel(r)}</span><span class="ms2">${r.ms.toFixed(0)}ms</span><span class="c">${r.cl?r.cl+'/shop/':''}${r.ing?r.ing+' → ':''}${r.pod?r.svc+'/'+r.pod:r.svc||(r.status===403?'blocked at WAF':r.status==='NXDOMAIN'?'no public DNS record':'–')}</span></div>`}).join('')||'<div class="ll ev">No matching lines</div>')}
 $('#log').addEventListener('click',e=>{const d=e.target.closest('[data-rid]');if(!d)return;S.selReq=ridMap[d.dataset.rid];renderTrace();renderLog()});
 $('#flt').addEventListener('input',e=>{S.flt=e.target.value;renderLog()});
 
@@ -469,23 +491,25 @@ $('#rate').oninput=e=>{S.rate=+e.target.value;sync()};
 $('#speed').oninput=e=>{S.speed=+e.target.value;sync()};
 $('#canary').oninput=e=>{S.canary=+e.target.value;sync()};
 $('#rl').onchange=e=>{S.rl=e.target.checked;sync()};
-document.querySelectorAll('[data-pol]').forEach(b=>b.onclick=()=>{S.policy=b.dataset.pol;sync();note(S.policy==='Local'?'Local: nodes without an ingress pod of the right class fail the health check (node-c for external, node-a for internal). No SNAT, so the internal ingress now logs real client IPs.':'Cluster: every node takes traffic on both load balancers, and every packet is SNATed to a node IP before it reaches nginx. IFA traffic still has the real client in X-Forwarded-For. Non-IFA traffic loses it.')});
+document.querySelectorAll('[data-pol]').forEach(b=>b.onclick=()=>{S.policy=b.dataset.pol;sync();note(S.policy==='Local'?'Local: in each cluster, only nodes running an ingress pod of the right class pass the load balancer health check. No SNAT, so the non-IFA ingress logs real client IPs.':'Cluster: every node behind both IPs takes traffic, and every packet is SNATed to a node IP. IFA traffic still has the real client in X-Forwarded-For. Non-IFA traffic loses it.')});
 $('#fc').innerHTML=clients.map(c=>`<option value="${c.id}">${c.name} · ${c.ip}</option>`).join('');
 const form=()=>[clients.find(c=>c.id===$('#fc').value),$('#fm').value,$('#fh').value,$('#fp').value];
 $('#go').onclick=()=>send(...form(),{select:true});
 $('#burst').onclick=()=>{const f=form();for(let i=0;i<15;i++)setTimeout(()=>{const r=send(...f);if(i===14){S.selReq=r;renderTrace()}},i*45)};
 const burst=(c,host,path)=>{for(let i=0;i<15;i++)setTimeout(()=>{const r=send(c,'GET',host,path);if(i===14){S.selReq=r;renderTrace()}},i*40)};
 const tries=[
- ['Where did my IP go?',()=>{S.policy='Cluster';S.sel={k:'ing',id:'ingress-nonifa-b'};sync();send(clients[3],'GET','shop.corp.internal','/products',{node:'node-a',select:true});
-  note('The teller (10.20.4.15) came in on the non-IFA IP 10.0.0.50 and landed on node-a, which has no non-IFA ingress pod. kube-proxy forwarded and SNATed it, so nginx-nonifa logs 10.0.1.11. There is no WAF header to fall back on. Switch to Local and send again.')}],
- ['Same app, two IPs',()=>{send(clients[0],'GET','shop.example.com','/products');send(clients[3],'GET','shop.corp.internal','/products',{select:true});S.sel={k:'svc',id:'web-svc'};sync();note('Two requests for the same page. The yellow one comes in on the IFA IP 34.120.8.10 (public DNS, WAF, nginx-ifa). The purple one comes in on the non-IFA IP 10.0.0.50 (corporate DNS, nginx-nonifa). After the ingress both reach web-svc and the same web pods in namespace shop. Pod labels count how many of each they served.')}],
- ['Internet → non-IFA IP',()=>{send(clients[0],'GET','shop.corp.internal','/',{select:true});S.sel={k:'pdns',id:'pdns'};sync();note('A browser on the internet asked for shop.corp.internal, the non-IFA name. Public DNS has no record and 10.0.0.50 is private, so it gets NXDOMAIN. Internet users can only use the IFA IP.')}],
- ['WAF blocks SQL injection',()=>{send(clients[1],'GET','shop.example.com',"/products?id=1' OR '1'='1",{select:true});S.sel={k:'waf',id:'waf'};sync();note('The WAF matched a SQL-injection rule and returned 403 at the edge. The request never reached the load balancer, so the cluster logs nothing.')}],
- ['Crash a web pod',()=>{killPod('web-7f9c-a1');S.sel={k:'pod',id:'web-7f9c-a1'};S.rate=Math.max(S.rate,6);sync();note('web-7f9c-a1 crashed. Watch for red 502s for about 3 seconds until the readiness probe fails, then traffic routes around it. It rejoins after about 10 seconds.')}],
- ['30% canary',()=>{S.canary=30;S.sel={k:'svc',id:'web-canary-svc'};sync();note('30% of IFA web traffic now goes to web-canary-svc (orange). It is slower and fails about 6% of the time. The rollouts.yaml tab shows canary and five other strategies step by step.')}],
- ['Trip the rate limit',()=>{S.rl=true;S.sel={k:'ing',id:'ingress-ifa-a'};sync();burst(clients[2],'shop.example.com','/api/orders');note('The partner sent 15 requests in under a second, and everything after the 5th got a 429. On the external class the limit keys on the real client IP from X-Forwarded-For.')}],
- ['Lose node-b',()=>{failNode('node-b');S.sel={k:'elb',id:'elb'};S.rate=Math.max(S.rate,6);sync();note('node-b ran both an IFA and a non-IFA ingress pod, plus the only canary. Connections sent there time out until both LBs drop it after 2.5 seconds.')}],
- ['Unknown host',()=>{send(clients[1],'GET','admin.example.com','/',{select:true});note('No Ingress rule matches admin.example.com, so nginx-ifa answers with 404 from its default backend.')}]];
+ ['One namespace, many clusters',()=>{S.sel={k:'ns',id:'east'};S.rate=Math.max(S.rate,5);sync();send(clients[0],'GET','shop.example.com','/products',{cl:'east'});send(clients[1],'GET','shop.example.com','/products',{cl:'west',select:true});
+  note('Two IFA requests for the same page: one landed in cluster-east, one in cluster-west. Both clusters run the same single namespace, shop, with the same Deployments, so either answer is identical. The inspector shows everything inside the namespace.')}],
+ ['Same app, two IPs',()=>{send(clients[0],'GET','shop.example.com','/products',{cl:'east'});send(clients[3],'GET','shop.corp.internal','/products',{cl:'east',select:true});S.sel={k:'svc',id:'east|web-svc'};sync();
+  note('Two requests into cluster-east: the yellow one on the IFA IP 34.120.8.10 (WAF, ingress-ifa), the purple one on the non-IFA IP 10.0.0.50 (GSLB, ingress-nonifa). After the ingress, both reach web-svc and the same web pods in namespace shop. Pod labels count IFA and non-IFA hits.')}],
+ ['Where did my IP go?',()=>{S.policy='Cluster';S.sel={k:'vip',id:'east|non'};sync();send(clients[3],'GET','shop.corp.internal','/products',{cl:'east',node:'node-a',select:true});
+  note('The teller came in on cluster-east\'s non-IFA IP and the LB chose node-a, which runs no non-IFA ingress pod. kube-proxy forwarded it to another node and SNATed it, so the ingress logs 10.0.1.11. Switch to Local and send again.')}],
+ ['Internet → non-IFA name',()=>{send(clients[0],'GET','shop.corp.internal','/',{select:true});S.sel={k:'pdns',id:'pdns'};sync();note('A browser on the internet asked for shop.corp.internal. Public DNS has no record and every non-IFA IP is private, so it gets NXDOMAIN. Internet users can only use the IFA IPs.')}],
+ ['WAF blocks SQL injection',()=>{send(clients[1],'GET','shop.example.com',"/products?id=1' OR '1'='1",{select:true});S.sel={k:'waf',id:'waf'};sync();note('The WAF matched a SQL-injection rule and returned 403 at the edge. No cluster ever saw the request.')}],
+ ['Lose cluster-east',()=>{failCluster('east');S.sel={k:'waf',id:'waf'};S.rate=Math.max(S.rate,6);sync();note('cluster-east went dark. For about 3 seconds the WAF and GSLB still send traffic there and requests time out. Then both drop it, and IFA and non-IFA traffic flows only to cluster-west. Click cluster-east to recover it.')}],
+ ['Lose a node',()=>{failNode('east|node-b');S.sel={k:'node',id:'east|node-b'};S.rate=Math.max(S.rate,6);sync();note('node-b in cluster-east failed. It hosted ingress-ifa-2, ingress-nonifa-1, a web pod, the canary and an api pod. Namespace shop is fine: its other pods on node-a and node-c keep serving.')}],
+ ['Crash a web pod',()=>{killPod('east|web-7f9c-a1x');S.sel={k:'pod',id:'east|web-7f9c-a1x'};S.rate=Math.max(S.rate,6);sync();note('web-7f9c-a1x in cluster-east crashed. Watch for red 502s for about 3 seconds until the readiness probe fails, then traffic routes around it. It rejoins after about 10 seconds.')}],
+ ['30% canary',()=>{S.canary=30;S.sel={k:'svc',id:'east|web-canary-svc'};sync();note('30% of web traffic in both clusters, on both IPs, now goes to web-canary-svc (orange). It is slower and fails about 6% of the time. The rollouts.yaml tab shows canary and five other strategies step by step.')}]];
 $('#try').insertAdjacentHTML('beforeend',tries.map((t,i)=>`<button data-try="${i}"><kbd>${i+1}</kbd>${t[0]}</button>`).join(''));
 $('#try').addEventListener('click',e=>{const b=e.target.closest('[data-try]');if(b)tries[+b.dataset.try][1]()});
 
@@ -684,7 +708,7 @@ const ro=new ResizeObserver(()=>{if(VIEW==='rollouts')renderD()});ro.observe($('
 /* =====================================================================
    SHELL: views, header, status, keys, loops
    ===================================================================== */
-const HEAD={traffic:{cmd:'<b>kubectl</b> <em>trace ingress -A --follow --show ifa,non-ifa</em>',ttl:'Follow a request through Kubernetes',sub:'Every dot is one request. One app in one namespace is reachable on two IPs: the IFA IP for internet traffic (yellow) and the non-IFA IP for internal traffic (purple). Follow either one through DNS, load balancer, node and ingress, and watch both land on the same Services and pods. Click any box to inspect it, and any log line to replay its trace.'},
+const HEAD={traffic:{cmd:'<b>kubectl</b> <em>trace ingress -A --follow --show ifa,non-ifa</em>',ttl:'Follow a request through Kubernetes',sub:'Every dot is one request. One app, one namespace (shop), copied to two clusters. Each cluster has an IFA IP for internet traffic (yellow) and a non-IFA IP for internal traffic (purple). The WAF and the corporate GSLB pick a healthy cluster, and both kinds of traffic land on the same Services and pods inside the namespace. Click any box to inspect it, and any log line to replay its trace.'},
  rollouts:{cmd:'<b>kubectl</b> <em>argo rollouts get rollout web --watch</em>',ttl:'Ship v2 without breaking v1',sub:'Pick a deployment strategy and watch it work pod by pod: ReplicaSets scaling, pods moving through their lifecycle, the traffic split shifting, and what users see when v2 is broken. Change the v2 behaviour to see how each strategy protects you, or does not.'}};
 function setView(v){VIEW=v;document.querySelectorAll('.tabs a').forEach(a=>{a.classList.toggle('on',a.dataset.v===v);a.setAttribute('aria-current',a.dataset.v===v?'page':'false')});
  $('#v-traffic').hidden=v!=='traffic';$('#v-rollouts').hidden=v!=='rollouts';const H=HEAD[v];$('#cmd').innerHTML=`❯ ${H.cmd} <span class="cur"></span>`;$('#ttl').innerHTML=`<span class="cm"># </span>${H.ttl}`;$('#sub').textContent=H.sub;

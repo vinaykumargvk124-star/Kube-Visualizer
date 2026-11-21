@@ -6,18 +6,17 @@ No build step and no dependencies: open `index.html` in a browser. The only exte
 
 ## Views
 
-### `traffic.flow`: follow a request through the cluster
+### `traffic.flow`: one namespace, many clusters, two entry IPs
 
-Live request dots travel from the client through DNS, the load balancer, the node, the ingress controller and the Service to a pod. Click any box to inspect it, or any log line to replay its full hop-by-hop trace, including the headers the pod receives.
+The app lives in **one namespace, `shop`**, deployed identically to **two clusters** (`cluster-east`, `cluster-west`). Each cluster has several pods per Deployment, spread across its nodes. Live request dots travel through the whole path. Click any box to inspect it, or any log line to replay its hop-by-hop trace, including the headers the pod receives.
 
-- **IFA vs non-IFA traffic, one app.** The same cluster, the same `shop` namespace and the same Deployments are reachable on two entry IPs:
-  - **IFA IP** `34.120.8.10`: `shop.example.com` → public DNS → CDN/WAF → IFA load balancer → `nginx-ifa` ingress controller.
-  - **non-IFA IP** `10.0.0.50`: `shop.corp.internal` → corporate DNS → private load balancer → `nginx-nonifa` ingress controller.
-  - Each controller has its own LoadBalancer Service and Ingress object (`shop-ifa`, `shop-nonifa`). Both route to the same Services and pods. Each pod's label counts how many IFA and non-IFA requests it served.
-- **externalTrafficPolicy `Cluster` vs `Local`**: SNAT, extra hops, load balancer health checks, and where the client IP is lost or kept (`X-Forwarded-For`, `X-Real-IP`).
-- **Ingress routing**: host and path rules, TLS termination, default backend 404s, `limit-rps`, canary weight.
-- **Services and EndpointSlices**: readiness, crashed pods still listed as endpoints (502), no endpoints (503).
-- **Failure scenarios**: pod crash, node failure, WAF blocking a SQL injection, an internet client trying the non-IFA name (NXDOMAIN), rate limiting.
+- **Every cluster has an IFA IP and a non-IFA IP** for the same app:
+  - **IFA** (`shop.example.com`): public DNS → CDN/WAF, which picks a healthy cluster from its origin pool → that cluster's IFA IP (`34.120.8.10` east, `34.120.9.20` west) → `ingress-ifa` pods.
+  - **non-IFA** (`shop.corp.internal`): corporate GSLB DNS, which answers with a healthy cluster's non-IFA IP (`10.0.0.50` east, `10.8.0.50` west) → `ingress-nonifa` pods.
+  - Both ingress controllers run inside namespace `shop`, and their Ingress objects (`shop-ifa`, `shop-nonifa`) point at the same Services, so both kinds of traffic reach the same pods. Each pod's label counts the IFA and non-IFA requests it served.
+- **The namespace is drawn as the main container.** Nodes are a strip underneath to show that the namespace spans all of them. Click the namespace for a `kubectl get deploy,svc,ingress -n shop` view of either cluster.
+- **externalTrafficPolicy `Cluster` vs `Local`**: SNAT, extra hops, LB health checks, and where the client IP is lost or kept.
+- **Scenarios**: one namespace across clusters, the same app on two IPs, client IP lost to SNAT, an internet client trying the non-IFA name (NXDOMAIN), the WAF blocking SQL injection, **cluster failover**, node failure, a pod crash (502 until readiness fails), and a 30% canary.
 
 ### `rollouts.yaml`: deployment strategies, pod by pod
 
